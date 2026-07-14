@@ -1,0 +1,292 @@
+// rgas-source main window — SPEC C-4 (tabs), C-6/C-7 (arm toggle + hotkey
+// routing), C-31/C-35 (connection warning), C-32 (speaker button), C-34 (scan),
+// C-38 (live spectrum analyzer).
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Shapes;
+using System.Windows.Threading;
+using RgasSoundboard.Audio;
+using RgasSoundboard.Hotkeys;
+
+namespace RgasSoundboard;
+
+public partial class MainWindow : Window
+{
+    private const int EqBands = 20;
+
+    private readonly DispatcherTimer _uiTimer;
+    private readonly DispatcherTimer _eqTimer;
+    private readonly Rectangle[] _eqBars = new Rectangle[EqBands];
+    private readonly Rectangle[] _eqCaps = new Rectangle[EqBands];
+    private readonly double[] _eqShown = new double[EqBands];
+    private readonly double[] _eqPeaks = new double[EqBands];
+    private readonly DropShadowEffect _connGlow = new() { ShadowDepth = 0, BlurRadius = 12, Opacity = 0.9 };
+    private bool _hornHeldByKeyboard;
+
+    public MainWindow()
+    {
+        InitializeComponent();
+
+        Soundboard.Init(App.Engine, App.Lib);
+        Capture.Init(App.Engine, App.Lib, App.Cfg);
+
+        // C-32: restore the persisted speaker mode (config default on first run)
+        App.Engine.Speaker = Config.ParseSpeaker(App.Lib.GetSpeakerMode()) ?? App.Cfg.DefaultSpeaker;
+        UpdateSpeakerButton();
+
+        // C-6: global hook routing (installed on the UI thread; callbacks arrive here)
+        App.Hook.SuppressCheck = () => IsActive &&
+            (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox);
+        App.Hook.Hotkey += OnHotkey;
+
+        // Disarmed: plain focused-window keys still work (C-3: hotkeys are an accelerator)
+        PreviewKeyDown += OnPreviewKeyDown;
+        PreviewKeyUp += OnPreviewKeyUp;
+
+        ConnDot.Effect = _connGlow;
+
+        // Safety: losing focus mid-press must never leave the horn latched on
+        // (the key-up would go to another window). C-9: tail plays, horn ends.
+        Deactivated += (_, _) =>
+        {
+            if (_hornHeldByKeyboard) { _hornHeldByKeyboard = false; App.Engine.HornUp(); }
+        };
+
+        _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _uiTimer.Tick += (_, _) => RefreshStatus();
+        _uiTimer.Start();
+
+        // C-38: spectrum refresh, faster cadence for smooth motion
+        _eqTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _eqTimer.Tick += (_, _) => RefreshSpectrum();
+        _eqTimer.Start();
+        EqCanvas.Loaded += (_, _) => BuildEqBars();
+        EqCanvas.SizeChanged += (_, _) => BuildEqBars();
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        // Dark title bar (Windows 11)
+        var hwnd = new WindowInteropHelper(this).Handle;
+        int on = 1;
+        _ = DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref on, sizeof(int));
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    // --- hotkeys (C-6..C-9) -----------------------------------------------------
+
+    private void OnHotkey(HotkeyAction action, bool isDown)
+    {
+        switch (action)
+        {
+            case HotkeyAction.Space when isDown: App.Engine.ToggleSpace(); break;
+            case HotkeyAction.Mode1 when isDown: App.Engine.SetMode(1); break;
+            case HotkeyAction.Mode2 when isDown: App.Engine.SetMode(2); break;
+            case HotkeyAction.Mode3 when isDown: App.Engine.SetMode(3); break;
+            case HotkeyAction.Mode4 when isDown: App.Engine.SetMode(4); break;
+            case HotkeyAction.Horn:
+                _hornHeldByKeyboard = isDown;
+                if (isDown) App.Engine.HornDown(); else App.Engine.HornUp();
+                break;
+        }
+    }
+
+    private static HotkeyAction? MapKey(Key key) => key switch
+    {
+        Key.Space => HotkeyAction.Space,
+        Key.D1 or Key.NumPad1 => HotkeyAction.Mode1,
+        Key.D2 or Key.NumPad2 => HotkeyAction.Mode2,
+        Key.D3 or Key.NumPad3 => HotkeyAction.Mode3,
+        Key.D4 or Key.NumPad4 => HotkeyAction.Mode4,
+        Key.H => HotkeyAction.Horn,
+        _ => null,
+    };
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (App.Hook.Armed) return; // the hook already consumed our keys
+        if (e.IsRepeat) { if (MapKey(e.Key) is not null) e.Handled = true; return; }
+        if (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox) return; // C-7
+        var action = MapKey(e.Key);
+        if (action is null) return;
+        OnHotkey(action.Value, true); // Horn case records _hornHeldByKeyboard
+        e.Handled = true;
+    }
+
+    private void OnPreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        if (App.Hook.Armed) return;
+        if (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox) return;
+        var action = MapKey(e.Key);
+        if (action is null) return;
+        if (action == HotkeyAction.Horn) OnHotkey(HotkeyAction.Horn, false);
+        e.Handled = true;
+    }
+
+    private void ArmToggle_Click(object sender, RoutedEventArgs e)
+    {
+        bool armed = ArmToggle.IsChecked == true;
+        App.Hook.Armed = armed;
+        if (!armed && _hornHeldByKeyboard) { _hornHeldByKeyboard = false; App.Engine.HornUp(); }
+        ArmText.Text = armed ? "🔴 ARMED · Space · 1-4 · H" : "HOTKEYS OFF — CLICK TO ARM";
+        ArmToggle.Background = armed
+            ? (Brush)FindResource("HornGradient")
+            : (Brush)FindResource("PanelGradient");
+    }
+
+    // --- speaker (C-32) ----------------------------------------------------------
+
+    private void SpeakerButton_Click(object sender, RoutedEventArgs e)
+    {
+        var next = App.Engine.Speaker switch
+        {
+            SpeakerMode.StreamOnly => SpeakerMode.PlaybackAndStream,
+            SpeakerMode.PlaybackAndStream => SpeakerMode.PlaybackOnly,
+            _ => SpeakerMode.StreamOnly,
+        };
+        App.Engine.Speaker = next;
+        App.Lib.SetSpeakerMode(Config.SpeakerName(next)); // persisted (C-32)
+        UpdateSpeakerButton();
+    }
+
+    private void UpdateSpeakerButton()
+    {
+        SpeakerText.Text = App.Engine.Speaker switch
+        {
+            SpeakerMode.PlaybackAndStream => "🔊 PLAYBACK + STREAM",
+            SpeakerMode.PlaybackOnly => "💻 PLAYBACK ONLY",
+            _ => "📡 STREAM ONLY",
+        };
+    }
+
+    // --- booth scan (C-34) ---------------------------------------------------------
+
+    private async void ScanButton_Click(object sender, RoutedEventArgs e)
+    {
+        ScanButton.IsEnabled = false;
+        ConnText.Text = "scanning subnet for booth (:4953)…";
+        try
+        {
+            var found = await BoothDiscovery.ScanAsync(App.Cfg.BoothPort, TimeSpan.FromMilliseconds(400));
+            if (found.Count == 0)
+            {
+                ConnText.Text = "scan: no booth found on this network";
+                return;
+            }
+            var pick = found[0];
+            var answer = MessageBox.Show(this,
+                found.Count == 1
+                    ? $"Found a booth at {pick}. Use it?"
+                    : $"Found {found.Count} booths ({string.Join(", ", found)}). Use {pick}?",
+                "Booth scan", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer == MessageBoxResult.Yes)
+            {
+                App.Cfg.BoothIp = pick;
+                try { App.Cfg.Save(AppContext.BaseDirectory); } catch { }
+                App.Engine.SetBoothTarget(pick, App.Cfg.BoothPort);
+            }
+        }
+        finally
+        {
+            ScanButton.IsEnabled = true;
+        }
+    }
+
+    // --- status ---------------------------------------------------------------------
+
+    private void RefreshStatus()
+    {
+        var s = App.Engine.Snapshot();
+        var dotBrush = (SolidColorBrush)FindResource(s.BoothConnected ? "PlayingBrush" : "WarnBrush");
+        ConnDot.Fill = dotBrush;
+        _connGlow.Color = dotBrush.Color;
+        ConnText.Text = s.BoothStatus;
+
+        if (s.HornActive)
+        {
+            NowPlayingText.Text = s.IsPlaying ? $"📢 HORN + {s.NowPlayingLabel}" : "📢 HORN";
+            RemainingText.Text = "";
+        }
+        else if (s.IsPlaying)
+        {
+            NowPlayingText.Text = $"▶ {s.NowPlayingLabel}";
+            RemainingText.Text = $"-{TimeSpan.FromSeconds(s.RemainingSeconds):m\\:ss}";
+        }
+        else
+        {
+            NowPlayingText.Text = s.Mode == 4 ? "SILENCE" : "READY";
+            RemainingText.Text = "";
+        }
+        Soundboard.RefreshFromSnapshot(s);
+    }
+
+    // --- spectrum analyzer (C-38) ------------------------------------------------------
+
+    private void BuildEqBars()
+    {
+        EqCanvas.Children.Clear();
+        double w = EqCanvas.ActualWidth, h = EqCanvas.ActualHeight;
+        if (w < 10 || h < 10) return;
+        double slot = w / EqBands;
+        var barBrush = (Brush)FindResource("EqBarGradient");
+        for (int i = 0; i < EqBands; i++)
+        {
+            var bar = new Rectangle
+            {
+                Width = Math.Max(2, slot - 5),
+                Height = 2,
+                RadiusX = 2,
+                RadiusY = 2,
+                Fill = barBrush,
+            };
+            Canvas.SetLeft(bar, i * slot + 2);
+            Canvas.SetTop(bar, h - 2);
+            EqCanvas.Children.Add(bar);
+            _eqBars[i] = bar;
+
+            var cap = new Rectangle
+            {
+                Width = Math.Max(2, slot - 5),
+                Height = 3,
+                RadiusX = 1.5,
+                RadiusY = 1.5,
+                Fill = new SolidColorBrush(Color.FromArgb(230, 125, 227, 255)),
+            };
+            Canvas.SetLeft(cap, i * slot + 2);
+            Canvas.SetTop(cap, h - 5);
+            EqCanvas.Children.Add(cap);
+            _eqCaps[i] = cap;
+        }
+    }
+
+    private void RefreshSpectrum()
+    {
+        if (_eqBars[0] is null) return;
+        double h = EqCanvas.ActualHeight;
+        if (h < 10) return;
+        var bands = App.Engine.GetSpectrum(EqBands);
+        for (int i = 0; i < EqBands; i++)
+        {
+            // fast attack, smooth release
+            _eqShown[i] = bands[i] > _eqShown[i]
+                ? bands[i]
+                : _eqShown[i] * 0.78;
+            // peak-hold caps with slow decay
+            _eqPeaks[i] = Math.Max(_eqPeaks[i] - 0.022, _eqShown[i]);
+
+            double bh = Math.Max(2, _eqShown[i] * (h - 6));
+            _eqBars[i].Height = bh;
+            Canvas.SetTop(_eqBars[i], h - bh);
+            Canvas.SetTop(_eqCaps[i], Math.Max(0, h - _eqPeaks[i] * (h - 6) - 5));
+        }
+    }
+}

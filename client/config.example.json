@@ -1,0 +1,12 @@
+{
+  "_comment": "rgas-source config (client SPEC C-33). Copy to config.json next to RgasSoundboard.exe. booth_ip may be left empty - the app warns and offers SCAN (C-34), and a successful scan persists the address here. mode_advance: 'continuous' (auto-advance, loops) or 'single_shot' (stop at track end). default_speaker_mode is the fresh-install output routing ('stream_only' | 'playback_and_stream' | 'playback_only'); the operator's last choice is persisted in the library store and wins (C-32).",
+  "booth_ip": "",
+  "booth_port": 4953,
+  "fade_out_seconds": 2.0,
+  "crossfade_seconds": 2.0,
+  "horn_duck_db": -6.0,
+  "music_target_lufs": -16.0,
+  "horn_target_lufs": -11.0,
+  "mode_advance": { "1": "continuous", "2": "single_shot", "3": "continuous" },
+  "default_speaker_mode": "stream_only"
+}

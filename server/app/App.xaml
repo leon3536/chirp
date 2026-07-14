@@ -1,0 +1,129 @@
+<Application x:Class="RgasReceiver.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <!-- ── tokens ──────────────────────────────────────────────────
+             Validated against surface #151C26 (validate_palette.js):
+             good 5.11:1 · warning 9.34:1 · critical 3.57:1 · accent 4.71:1
+             ink 15.2 / 7.97 / 3.77:1. Status colors are the reference
+             status palette (never reused as series colors). -->
+        <Color x:Key="PageColor">#0D1219</Color>
+        <Color x:Key="CardColor">#151C26</Color>
+        <Color x:Key="CardHiColor">#1B2431</Color>
+        <Color x:Key="GoodColor">#0CA30C</Color>
+        <Color x:Key="WarningColor">#FAB219</Color>
+        <Color x:Key="CriticalColor">#D03B3B</Color>
+        <Color x:Key="AccentColor">#3987E5</Color>
+
+        <SolidColorBrush x:Key="PageBrush" Color="{StaticResource PageColor}"/>
+        <SolidColorBrush x:Key="CardBrush" Color="{StaticResource CardColor}"/>
+        <SolidColorBrush x:Key="CardHiBrush" Color="{StaticResource CardHiColor}"/>
+        <SolidColorBrush x:Key="HairlineBrush" Color="#1AFFFFFF"/>
+        <SolidColorBrush x:Key="InkPrimaryBrush" Color="#EDF2F8"/>
+        <SolidColorBrush x:Key="InkSecondaryBrush" Color="#A7B2C0"/>
+        <SolidColorBrush x:Key="InkMutedBrush" Color="#6B7789"/>
+        <SolidColorBrush x:Key="InkFaintBrush" Color="#4A5568"/>
+        <SolidColorBrush x:Key="GoodBrush" Color="{StaticResource GoodColor}"/>
+        <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
+        <SolidColorBrush x:Key="CriticalBrush" Color="{StaticResource CriticalColor}"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+        <!-- meter tracks: a darker step of the fill's own ramp (state reads across the whole bar) -->
+        <SolidColorBrush x:Key="AccentTrackBrush" Color="#17304D"/>
+        <SolidColorBrush x:Key="GoodTrackBrush" Color="#11301A"/>
+        <SolidColorBrush x:Key="WarningTrackBrush" Color="#3B2F10"/>
+        <SolidColorBrush x:Key="CriticalTrackBrush" Color="#391418"/>
+        <!-- sparkline: de-emphasis step of the accent ramp -->
+        <SolidColorBrush x:Key="SparkBrush" Color="#2A4E79"/>
+        <SolidColorBrush x:Key="LedOffBrush" Color="#26303E"/>
+
+        <FontFamily x:Key="MonoFont">Consolas</FontFamily>
+
+        <!-- ── text roles ──────────────────────────────────────────────── -->
+        <Style x:Key="TileLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource InkMutedBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+        </Style>
+        <Style x:Key="TileValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource InkPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="30"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="MeterLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource InkMutedBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="MeterValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource InkSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+
+        <!-- ── surfaces ────────────────────────────────────────────────── -->
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+        </Style>
+
+        <Style x:Key="CaptionButton" TargetType="Button">
+            <Setter Property="Width" Value="44"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource InkMutedBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource CardHiColor}"/>
+                                <Setter Property="Foreground" Value="{StaticResource InkPrimaryBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── thin, quiet scrollbars ──────────────────────────────────── -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border Background="#2A3444" CornerRadius="4" Margin="1"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto"/>
+                    <Setter Property="Height" Value="8"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Application.Resources>
+</Application>

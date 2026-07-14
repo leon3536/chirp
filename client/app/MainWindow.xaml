@@ -1,0 +1,124 @@
+<Window x:Class="RgasSoundboard.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:RgasSoundboard.UI"
+        Title="RGAS Soundboard" WindowState="Maximized" MinWidth="960" MinHeight="540"
+        Background="{StaticResource BgBrush}" WindowStartupLocation="CenterScreen"
+        FontFamily="{StaticResource BodyFont}">
+    <!-- C-4: one window, two tabs. C-36: 1920x1080 design canvas in a Viewbox.
+         C-38: live spectrum analyzer top-right. -->
+    <Viewbox Stretch="Uniform">
+        <Grid Width="1920" Height="1080">
+
+            <!-- ===== Ice-rink backdrop (vector, C-36-friendly) ===== -->
+            <Border>
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#0B111B" Offset="0"/>
+                        <GradientStop Color="#0A0E15" Offset="0.45"/>
+                        <GradientStop Color="#0D1523" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+            </Border>
+            <!-- arena light pool -->
+            <Ellipse Width="2400" Height="1200" Margin="0,-560,0,0" VerticalAlignment="Top"
+                     HorizontalAlignment="Center" IsHitTestVisible="False">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#1438BDF8" Offset="0"/>
+                        <GradientStop Color="#00000000" Offset="1"/>
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <!-- rink markings -->
+            <Canvas IsHitTestVisible="False" Opacity="0.09">
+                <Rectangle Canvas.Left="110" Canvas.Top="150" Width="1700" Height="860"
+                           RadiusX="230" RadiusY="230" Stroke="#FFFFFF" StrokeThickness="6"/>
+                <!-- center red line + circle -->
+                <Rectangle Canvas.Left="952" Canvas.Top="150" Width="16" Height="860" Fill="#E5484D"/>
+                <Ellipse Canvas.Left="810" Canvas.Top="430" Width="300" Height="300"
+                         Stroke="#E5484D" StrokeThickness="6"/>
+                <Ellipse Canvas.Left="948" Canvas.Top="568" Width="24" Height="24" Fill="#3D8BFD"/>
+                <!-- blue lines -->
+                <Rectangle Canvas.Left="600" Canvas.Top="150" Width="14" Height="860" Fill="#3D8BFD"/>
+                <Rectangle Canvas.Left="1306" Canvas.Top="150" Width="14" Height="860" Fill="#3D8BFD"/>
+                <!-- faceoff circles -->
+                <Ellipse Canvas.Left="230" Canvas.Top="240" Width="220" Height="220" Stroke="#E5484D" StrokeThickness="5"/>
+                <Ellipse Canvas.Left="230" Canvas.Top="700" Width="220" Height="220" Stroke="#E5484D" StrokeThickness="5"/>
+                <Ellipse Canvas.Left="1470" Canvas.Top="240" Width="220" Height="220" Stroke="#E5484D" StrokeThickness="5"/>
+                <Ellipse Canvas.Left="1470" Canvas.Top="700" Width="220" Height="220" Stroke="#E5484D" StrokeThickness="5"/>
+                <Ellipse Canvas.Left="330" Canvas.Top="340" Width="20" Height="20" Fill="#E5484D"/>
+                <Ellipse Canvas.Left="330" Canvas.Top="800" Width="20" Height="20" Fill="#E5484D"/>
+                <Ellipse Canvas.Left="1570" Canvas.Top="340" Width="20" Height="20" Fill="#E5484D"/>
+                <Ellipse Canvas.Left="1570" Canvas.Top="800" Width="20" Height="20" Fill="#E5484D"/>
+            </Canvas>
+
+            <!-- ===== Content ===== -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="118"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header / scoreboard strip -->
+                <Border Grid.Row="0" Background="{StaticResource TopBarGradient}"
+                        BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1"
+                        Padding="24,10">
+                    <DockPanel>
+                        <!-- C-38: live spectrum analyzer, top-right -->
+                        <Border DockPanel.Dock="Right" Width="340" Margin="18,0,0,0"
+                                Background="#0A101B" CornerRadius="12"
+                                BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                                Padding="10,8">
+                            <Canvas x:Name="EqCanvas" ClipToBounds="True"/>
+                        </Border>
+
+                        <!-- C-6 arm + C-32 speaker, stacked to make room for the EQ -->
+                        <StackPanel DockPanel.Dock="Right" Width="330" Margin="18,0,0,0">
+                            <ToggleButton x:Name="ArmToggle" Style="{StaticResource BigButton}"
+                                          MinHeight="44" Click="ArmToggle_Click" Padding="12,2">
+                                <TextBlock x:Name="ArmText" Text="HOTKEYS OFF — CLICK TO ARM" FontSize="17"/>
+                            </ToggleButton>
+                            <Button x:Name="SpeakerButton" Style="{StaticResource BigButton}"
+                                    MinHeight="44" Margin="0,8,0,0" Click="SpeakerButton_Click" Padding="12,2">
+                                <TextBlock x:Name="SpeakerText" Text="📡 STREAM ONLY" FontSize="17"/>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- status + now playing -->
+                        <StackPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="ConnDot" Width="16" Height="16" Fill="{StaticResource WarnBrush}"
+                                         VerticalAlignment="Center"/>
+                                <TextBlock x:Name="ConnText" Style="{StaticResource DarkText}" Margin="10,0,14,0"
+                                           FontSize="18" VerticalAlignment="Center" Text="starting…"
+                                           Foreground="{StaticResource MutedBrush}"/>
+                                <Button x:Name="ScanButton" Style="{StaticResource BigButton}" MinWidth="120"
+                                        MinHeight="36" Padding="12,0" Click="ScanButton_Click">
+                                    <TextBlock Text="SCAN" FontSize="15"/>
+                                </Button>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock x:Name="NowPlayingText" FontFamily="{StaticResource DisplayFont}"
+                                           Foreground="{StaticResource TextBrush}" FontSize="30"
+                                           FontWeight="Bold" VerticalAlignment="Center" Text="READY"/>
+                                <TextBlock x:Name="RemainingText" FontFamily="{StaticResource DisplayFont}"
+                                           FontSize="28" Foreground="{StaticResource IceBrush}"
+                                           Margin="16,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+                    <TabItem Header="SOUNDBOARD">
+                        <ui:SoundboardView x:Name="Soundboard"/>
+                    </TabItem>
+                    <TabItem Header="CAPTURE">
+                        <ui:CaptureView x:Name="Capture"/>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+        </Grid>
+    </Viewbox>
+</Window>

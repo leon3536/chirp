@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- rgas-source soundboard — SPEC C-1, C-2: native WPF, self-contained
+       single-file portable exe. Publish:
+         dotnet publish -c Release -r win-x64 -o ../publish -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RgasSoundboard</AssemblyName>
+    <RootNamespace>RgasSoundboard</RootNamespace>
+    <ApplicationIcon>assets\icon.ico</ApplicationIcon>
+    <ApplicationManifest></ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- InvariantGlobalization is incompatible with WPF font fallback
+         (MS.Internal.FontCache.MajorLanguages needs real cultures). -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- C-20: the three-part horn ships inside the executable (embedded). -->
+    <EmbeddedResource Include="assets\horn_attack.wav" />
+    <EmbeddedResource Include="assets\horn_loop.wav" />
+    <EmbeddedResource Include="assets\horn_tail.wav" />
+  </ItemGroup>
+
+</Project>

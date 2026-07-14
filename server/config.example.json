@@ -1,0 +1,7 @@
+{
+  "_comment": "rgas-booth config (SPEC S-8). Copy to config.json next to RgasReceiver.exe. buffer_ms is THE latency/stability knob (RGAS tunable 80-250, see RUNBOOK). output_device_match pins the WASAPI output by name substring, e.g. 'USB Audio'; empty string = system default.",
+  "listen_port": 4953,
+  "buffer_ms": 150,
+  "output_device_match": "",
+  "status_port": 1780
+}

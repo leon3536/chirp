@@ -1,0 +1,20 @@
+# .NET
+bin/
+obj/
+publish/
+
+# Rinkside site config (copy from config.example.json)
+client/config.json
+
+# Audio never enters the repo for copyright reasons (client SPEC C-21).
+# The committed goal-horn asset is the single exception (C-20).
+client/library/
+*.mp3
+*.m4a
+*.aac
+*.ogg
+*.wav
+*.flac
+!client/app/assets/horn_attack.wav
+!client/app/assets/horn_loop.wav
+!client/app/assets/horn_tail.wav

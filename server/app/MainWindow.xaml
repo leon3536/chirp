@@ -1,0 +1,229 @@
+<Window x:Class="RgasReceiver.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RGAS Booth Receiver" Width="880" Height="680" MinWidth="760" MinHeight="600"
+        Background="{StaticResource PageBrush}" WindowStartupLocation="CenterScreen"
+        WindowStyle="None" AllowsTransparency="False"
+        TextOptions.TextRenderingMode="ClearType" UseLayoutRounding="True">
+    <!-- S-16 status dashboard + S-17 telemetry. Read-only by design.
+         Design method: dataviz skill — severity meters on same-ramp tracks,
+         sentence-case tile labels, proportional semibold figures, hairlines,
+         status colors validated against the card surface. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="46" ResizeBorderThickness="6" GlassFrameThickness="0"
+                      CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="46"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ── title bar ─────────────────────────────────────────────── -->
+        <DockPanel Grid.Row="0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,8,10,8"
+                        WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Style="{StaticResource CaptionButton}" Content="&#xE949;" FontFamily="Segoe MDL2 Assets"
+                        Click="Minimize_Click"/>
+                <Button Style="{StaticResource CaptionButton}" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets"
+                        Click="Close_Click"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
+                <Ellipse x:Name="TitleDot" Width="8" Height="8" Fill="{StaticResource WarningBrush}"
+                         VerticalAlignment="Center"/>
+                <TextBlock Text="RGAS Booth Receiver" Foreground="{StaticResource InkSecondaryBrush}"
+                           FontSize="12.5" FontWeight="SemiBold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource HairlineBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="8,2,8,3" Margin="12,0,0,0"
+                        VerticalAlignment="Center">
+                    <TextBlock x:Name="PortText" Text="tcp :4953" Foreground="{StaticResource InkMutedBrush}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+                </Border>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- ── hero: state + indicator lights (S-17c) ─────────────────── -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="20,4,20,0" Padding="26,22">
+            <Grid>
+                <!-- state wash: current state color at ~7% opacity, set from code -->
+                <Border x:Name="HeroWash" CornerRadius="10" Margin="-26,-22" Opacity="0.07"
+                        Background="{StaticResource WarningBrush}"/>
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel Margin="0,0,30,0">
+                            <Grid HorizontalAlignment="Center">
+                                <Ellipse Width="20" Height="20" Fill="{StaticResource CardHiBrush}"/>
+                                <Ellipse x:Name="SourceLed" Width="12" Height="12" Fill="{StaticResource LedOffBrush}"/>
+                            </Grid>
+                            <TextBlock Text="Source" Style="{StaticResource TileLabel}" Margin="0,7,0,0"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Margin="0,0,6,0">
+                            <Grid HorizontalAlignment="Center">
+                                <Ellipse Width="20" Height="20" Fill="{StaticResource CardHiBrush}"/>
+                                <Ellipse x:Name="SignalLed" Width="12" Height="12" Fill="{StaticResource LedOffBrush}"/>
+                            </Grid>
+                            <TextBlock Text="Signal" Style="{StaticResource TileLabel}" Margin="0,7,0,0"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="StateDot" Width="18" Height="18" Fill="{StaticResource WarningBrush}"
+                                 VerticalAlignment="Center">
+                            <Ellipse.Effect>
+                                <DropShadowEffect x:Name="StateGlow" Color="#FAB219" BlurRadius="22"
+                                                  ShadowDepth="0" Opacity="0.85"/>
+                            </Ellipse.Effect>
+                        </Ellipse>
+                        <StackPanel Margin="20,0,0,0">
+                            <TextBlock x:Name="StateText" Text="Waiting for rinkside"
+                                       Foreground="{StaticResource InkPrimaryBrush}" FontSize="34"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="StateSubText" Text="no source connected"
+                                       Foreground="{StaticResource InkMutedBrush}" FontSize="13"
+                                       Margin="1,3,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </DockPanel>
+            </Grid>
+        </Border>
+
+        <!-- ── stream card: buffer gauge + sparkline + level meters ───── -->
+        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="20,12,20,0" Padding="22,18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="112"/>
+                    <ColumnDefinition Width="118"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="16"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="10"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- buffer: accent fill on accent-ramp track, tick at target -->
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Buffer" Style="{StaticResource MeterLabel}"/>
+                <Grid Grid.Row="0" Grid.Column="1" x:Name="BufferTrack" Height="12" VerticalAlignment="Center">
+                    <Border Background="{StaticResource AccentTrackBrush}" CornerRadius="6"/>
+                    <Border x:Name="BufferFill" HorizontalAlignment="Left" Width="0"
+                            Background="{StaticResource AccentBrush}" CornerRadius="6"/>
+                    <Rectangle x:Name="BufferTick" HorizontalAlignment="Left" Width="2" Margin="0,-3"
+                               Fill="{StaticResource InkMutedBrush}"/>
+                </Grid>
+                <TextBlock Grid.Row="0" Grid.Column="2" x:Name="BufferText" Text="0 / 150 ms"
+                           Style="{StaticResource MeterValue}" Margin="14,0,0,0"/>
+                <!-- 45 s fill history: de-emphasis stroke, current point in accent -->
+                <Grid Grid.Row="0" Grid.Column="3" Margin="18,0,0,0" VerticalAlignment="Center">
+                    <Polyline x:Name="Sparkline" Stroke="{StaticResource SparkBrush}" StrokeThickness="2"
+                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Height="22" Width="100" Stretch="None"/>
+                    <Ellipse x:Name="SparkDot" Width="5" Height="5" Fill="{StaticResource AccentBrush}"
+                             HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed"/>
+                </Grid>
+
+                <!-- levels: severity fill (good→warning→critical) on same-ramp track + peak-hold -->
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Level L" Style="{StaticResource MeterLabel}"/>
+                <Grid Grid.Row="2" Grid.Column="1" x:Name="MeterLTrack" Height="8" VerticalAlignment="Center">
+                    <Border x:Name="MeterLBack" Background="{StaticResource GoodTrackBrush}" CornerRadius="4"/>
+                    <Border x:Name="MeterLFill" HorizontalAlignment="Left" Width="0"
+                            Background="{StaticResource GoodBrush}" CornerRadius="4"/>
+                    <Rectangle x:Name="MeterLHold" HorizontalAlignment="Left" Width="2" Margin="0,-2"
+                               Fill="{StaticResource InkSecondaryBrush}" Visibility="Collapsed"/>
+                </Grid>
+                <TextBlock Grid.Row="2" Grid.Column="2" x:Name="MeterLText" Text="−∞ dB"
+                           Style="{StaticResource MeterValue}" Foreground="{StaticResource InkMutedBrush}"
+                           FontSize="11.5" Margin="14,0,0,0"/>
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Level R" Style="{StaticResource MeterLabel}"/>
+                <Grid Grid.Row="4" Grid.Column="1" x:Name="MeterRTrack" Height="8" VerticalAlignment="Center">
+                    <Border x:Name="MeterRBack" Background="{StaticResource GoodTrackBrush}" CornerRadius="4"/>
+                    <Border x:Name="MeterRFill" HorizontalAlignment="Left" Width="0"
+                            Background="{StaticResource GoodBrush}" CornerRadius="4"/>
+                    <Rectangle x:Name="MeterRHold" HorizontalAlignment="Left" Width="2" Margin="0,-2"
+                               Fill="{StaticResource InkSecondaryBrush}" Visibility="Collapsed"/>
+                </Grid>
+                <TextBlock Grid.Row="4" Grid.Column="2" x:Name="MeterRText" Text="−∞ dB"
+                           Style="{StaticResource MeterValue}" Foreground="{StaticResource InkMutedBrush}"
+                           FontSize="11.5" Margin="14,0,0,0"/>
+            </Grid>
+        </Border>
+
+        <!-- ── telemetry tiles (S-17) ─────────────────────────────────── -->
+        <UniformGrid Grid.Row="3" Columns="4" Margin="14,12,14,0">
+            <Border Style="{StaticResource Card}" Margin="6,0" Padding="16,12">
+                <StackPanel>
+                    <TextBlock Text="Connections" Style="{StaticResource TileLabel}"/>
+                    <TextBlock x:Name="ConnCountText" Text="0" Style="{StaticResource TileValue}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="6,0" Padding="16,12">
+                <StackPanel>
+                    <TextBlock Text="Sound bites" Style="{StaticResource TileLabel}"/>
+                    <TextBlock x:Name="BiteCountText" Text="0" Style="{StaticResource TileValue}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="6,0" Padding="16,12">
+                <StackPanel>
+                    <TextBlock Text="Underruns" Style="{StaticResource TileLabel}"/>
+                    <TextBlock x:Name="UnderrunText" Text="0" Style="{StaticResource TileValue}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="6,0" Padding="16,12">
+                <StackPanel>
+                    <TextBlock Text="Uptime" Style="{StaticResource TileLabel}"/>
+                    <TextBlock x:Name="UptimeText" Text="0:00:00" Style="{StaticResource TileValue}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <!-- ── connection history (S-17a) + live log ──────────────────── -->
+        <Grid Grid.Row="4" Margin="20,12,20,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="5*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="7*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource Card}" Padding="0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Connection log" Style="{StaticResource TileLabel}"
+                               Margin="18,12,18,8"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,0,12,12">
+                        <ItemsControl x:Name="ConnList"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Event log" Style="{StaticResource TileLabel}"
+                               Margin="18,12,18,8"/>
+                    <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled" Padding="18,0,12,12">
+                        <TextBlock x:Name="LogText" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                   Foreground="{StaticResource InkSecondaryBrush}" LineHeight="17"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <!-- ── footer ─────────────────────────────────────────────────── -->
+        <DockPanel Grid.Row="5" Margin="22,10,22,12">
+            <TextBlock x:Name="DeviceText" Text="output —" Foreground="{StaticResource InkFaintBrush}"
+                       FontSize="11.5"/>
+            <TextBlock x:Name="StatusUrlText" Text="" Foreground="{StaticResource InkFaintBrush}"
+                       FontFamily="{StaticResource MonoFont}" FontSize="11" HorizontalAlignment="Right"/>
+        </DockPanel>
+    </Grid>
+</Window>

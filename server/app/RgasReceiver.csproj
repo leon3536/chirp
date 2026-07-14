@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- rgas-booth receiver — SPEC S-1: self-contained single-file, copy-and-run.
+       S-16: windowed status dashboard (WPF).
+       Publish: dotnet publish -c Release -r win-x64 -o ../publish -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RgasReceiver</AssemblyName>
+    <RootNamespace>RgasReceiver</RootNamespace>
+    <ApplicationIcon>assets\icon.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- InvariantGlobalization is NOT set: WPF's font cache requires real
+         cultures and crashes with CultureNotFoundException under it. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+</Project>
