@@ -1,7 +1,8 @@
 {
-  "_comment": "rgas-booth config (SPEC S-8). Copy to config.json next to RgasReceiver.exe. buffer_ms is THE latency/stability knob (RGAS tunable 80-250, see RUNBOOK). output_device_match pins the WASAPI output by name substring, e.g. 'USB Audio'; empty string = system default.",
+  "_comment": "rgas-booth config (SPEC S-8). Copy to config.json next to RgasReceiver.exe. buffer_ms is THE latency/stability knob (RGAS tunable 80-250, see RUNBOOK). output_device_match pins the WASAPI output by name substring, e.g. 'USB Audio'; empty string = system default. output_volume_percent (S-6b) re-asserts endpoint volume + unmute on every device claim so a muted/nudged output self-heals; null = leave the device alone. On the booth, set it (e.g. 100) and control loudness at the mixer.",
   "listen_port": 4953,
   "buffer_ms": 150,
   "output_device_match": "",
+  "output_volume_percent": 100,
   "status_port": 1780
 }

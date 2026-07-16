@@ -33,6 +33,25 @@ the sliders, preview (local only), name it, tick collections, save. Saving
 loudness-normalizes to −16 LUFS so every clip plays at the same level (C-25).
 Collections belong to one mode; clips can be in many collections (C-16).
 
+## The library folder — handle with care
+
+`library\` (next to the exe, e.g. `client\publish\library\`) holds the real,
+irreplaceable clip collection: normalized WAVs plus `library.json` with names,
+collections, and mode assignments. It is deliberately **not in git** (C-21) and
+is **not covered by OneDrive** (the repo lives outside the OneDrive sync scope).
+
+- **Do not move, rename, restructure, or delete the `library\` folder — or
+  anything in it — unless explicitly asked to.** This applies to humans and to
+  coding agents working in this repo. All library changes go through the app.
+- **`git clean -fdx` will delete it.** Gitignored files are exactly what
+  `-x` removes; never run it under `client\` without backing the library up.
+- Republishing (`dotnet publish -o ..\publish`) is safe — it overwrites the exe
+  and leaves `library\` and `config.json` alone.
+- To back up or move machines: copy the whole folder (exe + `config.json` +
+  `library\`). If you park a copy in OneDrive, right-click it and choose
+  **"Always keep on this device"** — Files On-Demand placeholders would fail at
+  the rink where there is no internet (C-7).
+
 ## Building from source
 
 ```powershell

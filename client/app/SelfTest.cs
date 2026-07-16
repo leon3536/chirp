@@ -29,6 +29,8 @@ public static class SelfTest
             TestLoudness();
             TestWavRoundTrip(tempDir);
             TestEngine(tempDir);
+            TestShuffleWeave(tempDir);
+            TestTailFadeAndMasterVolume(tempDir);
             TestPusher();
         }
         catch (Exception ex)
@@ -155,6 +157,11 @@ public static class SelfTest
         // C-17 guard: the last selected collection of a populated mode can't be deselected
         Check(!lib.SetSelected(col.Id, false), "last selected collection refuses deselection");
 
+        // C-40: device enumeration never throws; entries are well-formed
+        var devices = AudioEngine.EnumerateOutputDevices();
+        Check(devices.All(d => !string.IsNullOrEmpty(d.Id) && !string.IsNullOrEmpty(d.Name)),
+            $"output device enumeration well-formed ({devices.Count} device(s))");
+
         // C-39: membership toggle + collection deletion semantics
         var colB = lib.AddCollection("test-b", 1);
         lib.ToggleMembership(clipId, colB.Id);
@@ -169,6 +176,95 @@ public static class SelfTest
             "DeleteCollection auto-selects a remaining collection (C-17)");
         lib.ToggleMembership(clipId, colB.Id);
         Check(!lib.Clips[0].Collections.Contains(colB.Id), "ToggleMembership removes a collection");
+
+        // C-39: MoveClip = leave source, join target, in one operation
+        var colC = lib.AddCollection("test-c", 1);
+        lib.ToggleMembership(clipId, colB.Id); // clip in B
+        lib.MoveClip(clipId, colB.Id, colC.Id);
+        Check(!lib.Clips[0].Collections.Contains(colB.Id) && lib.Clips[0].Collections.Contains(colC.Id),
+            "MoveClip leaves the source and joins the target collection");
+    }
+
+    // --- C-10: shuffle bag absorbs pool edits mid-cycle -----------------------------
+
+    private static void TestShuffleWeave(string tempDir)
+    {
+        var dir = Path.Combine(tempDir, "weave");
+        Directory.CreateDirectory(dir);
+        var cfg = new Config();
+        var lib = new LibraryStore(dir);
+        var colA = lib.AddCollection("bag-a", 1);
+        foreach (var name in new[] { "a1", "a2", "a3" })
+        {
+            Normalizer.EncodeWav16(Path.Combine(lib.AudioDir, $"{name}.wav"), Sine(220, 0.3f, 0.6));
+            lib.AddClip(name, $"{name}.wav", 0.6, new[] { colA.Id });
+        }
+        using var engine = new AudioEngine(cfg, lib, startRenderThread: false);
+        engine.SetMode(1);
+        engine.ToggleSpace(); // bag built from {a1,a2,a3}; one dequeued
+
+        // A new selected collection appears mid-cycle (the reported bug)
+        var colB = lib.AddCollection("bag-b", 1);
+        Normalizer.EncodeWav16(Path.Combine(lib.AudioDir, "fresh.wav"), Sine(440, 0.3f, 0.6));
+        lib.AddClip("fresh", "fresh.wav", 0.6, new[] { colB.Id });
+
+        engine.ToggleSpace(); // stop (fade)
+        engine.ToggleSpace(); // start -> the pull that must weave "fresh" in
+        var upcoming = engine.ShuffleQueueLabelsForTest(1)
+            .Append(engine.Snapshot().NowPlayingLabel)
+            .ToHashSet();
+        Check(upcoming.Contains("fresh"),
+            "newly checked collection joins the shuffle bag mid-cycle");
+        Check(upcoming.Count == 3,
+            $"weave keeps the no-repeat cycle intact ({upcoming.Count} of 3 unplayed left)");
+    }
+
+    // --- C-12 natural-end fade + C-41 master volume ---------------------------------
+
+    private static void TestTailFadeAndMasterVolume(string tempDir)
+    {
+        var dir = Path.Combine(tempDir, "tail");
+        Directory.CreateDirectory(dir);
+        var cfg = new Config(); // fade_out_seconds default: 1.0
+        var lib = new LibraryStore(dir);
+        var col = lib.AddCollection("tail", 1);
+        // Constant-amplitude tone that would end dead-abrupt without the tail fade
+        Normalizer.EncodeWav16(Path.Combine(lib.AudioDir, "hot.wav"), Sine(330, 0.4f, 3.0));
+        lib.AddClip("hot", "hot.wav", 3.0, new[] { col.Id });
+
+        using var engine = new AudioEngine(cfg, lib, startRenderThread: false);
+        var mix = new float[480 * 2];
+        var pcm = new byte[480 * 2 * 2];
+        double BlockLevel()
+        {
+            engine.RenderOneBlockForTest(mix, pcm);
+            double sum = 0;
+            foreach (var s in mix) sum += Math.Abs(s);
+            return sum / mix.Length;
+        }
+
+        engine.SetMode(1);
+        engine.ToggleSpace();
+        double mid = 0, nearEnd = 0;
+        for (int b = 0; b < 296; b++)
+        {
+            double level = BlockLevel();
+            if (b == 150) mid = level;      // 1.5 s in: full level
+            if (b == 293) nearEnd = level;  // ~60 ms before the end of the 3 s clip
+        }
+        Check(nearEnd < mid * 0.15, $"natural clip end fades out (end/mid = {nearEnd / mid:0.000})");
+
+        // C-41: master volume scales the mix, smoothed; 0 = silence
+        // (continuous mode advanced into the next playthrough at full level)
+        for (int b = 0; b < 40; b++) BlockLevel(); // settle into the new track
+        double full = BlockLevel();
+        engine.MasterVolume = 0.5;
+        for (int b = 0; b < 40; b++) BlockLevel(); // smoothing settles
+        double half = BlockLevel();
+        Check(Math.Abs(half / full - 0.5) < 0.1, $"master volume 50% halves output ({half / full:0.00})");
+        engine.MasterVolume = 0;
+        for (int b = 0; b < 40; b++) BlockLevel();
+        Check(BlockLevel() < 1e-4, "master volume 0 silences output");
     }
 
     // --- C-29/C-31: booth push against a fake snapserver -------------------------------

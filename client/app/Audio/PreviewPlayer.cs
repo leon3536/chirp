@@ -1,7 +1,7 @@
-// rgas-source trim preview — SPEC C-24: preview plays on the LOCAL default
-// device only, never pushed to the booth. One shot at a time; disabled while
-// recording (C-28, enforced by the Capture view).
-using NAudio.CoreAudioApi;
+// rgas-source trim preview — SPEC C-24: preview plays on the LOCAL device
+// only (the C-40 selected one, or the system default), never pushed to the
+// booth. One shot at a time; disabled while recording (C-28, enforced by the
+// Capture view).
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -13,8 +13,9 @@ public sealed class PreviewPlayer : IDisposable
 
     public bool IsPlaying => _out?.PlaybackState == PlaybackState.Playing;
 
-    /// <summary>Play a slice (frame indexes) of interleaved stereo 48 kHz floats.</summary>
-    public void Play(float[] stereo, int startFrame, int endFrame)
+    /// <summary>Play a slice (frame indexes) of interleaved stereo 48 kHz floats
+    /// on the given device (null = system default), per C-40.</summary>
+    public void Play(float[] stereo, int startFrame, int endFrame, string? deviceId = null)
     {
         Stop();
         startFrame = Math.Clamp(startFrame, 0, stereo.Length / 2);
@@ -26,9 +27,9 @@ public sealed class PreviewPlayer : IDisposable
         try
         {
             var provider = new Normalizer.FloatArrayProvider(slice, Normalizer.SampleRate, 2);
-            _out = new WasapiOut(AudioClientShareMode.Shared, 100);
+            try { _out = AudioEngine.CreateOutput(deviceId, 100); }
+            catch when (deviceId is not null) { _out = AudioEngine.CreateOutput(null, 100); }
             _out.Init(new SampleToWaveProvider16(provider));
-            _out.PlaybackStopped += (_, _) => { };
             _out.Play();
         }
         catch

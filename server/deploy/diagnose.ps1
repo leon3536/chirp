@@ -1,5 +1,5 @@
 # rgas-booth diagnostics -- SPEC S-15. Read-only; safe to run any time.
-param([string]$ExeDir = "$PSScriptRoot\..\publish")
+param([string]$ExeDir = "$PSScriptRoot")
 
 function Section([string]$Title) { Write-Host "`n=== $Title ===" }
 
@@ -38,6 +38,15 @@ Section "Firewall"
 foreach ($name in @("RGAS PCM in", "RGAS status in")) {
     $rule = Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue
     if ($rule) { Write-Host "$name : $($rule.Enabled)" } else { Write-Host "$name : MISSING" -ForegroundColor Red }
+}
+# A Windows auto-created BLOCK rule overrides our allows -> external dead,
+# localhost fine. This is the #1 "works locally, not from the client" cause.
+$block = Get-NetFirewallRule -DisplayName "RgasReceiver" -Action Block -Enabled True -ErrorAction SilentlyContinue
+if ($block) {
+    Write-Host "BLOCK rule 'RgasReceiver' present -> BLOCKS external access. Fix:" -ForegroundColor Red
+    Write-Host "    Remove-NetFirewallRule -DisplayName 'RgasReceiver'   (admin)" -ForegroundColor Red
+} else {
+    Write-Host "no blocking 'RgasReceiver' rule (good)"
 }
 
 Section "WiFi adapter power management (should be disabled)"

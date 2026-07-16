@@ -106,7 +106,8 @@
                             <DataTemplate>
                                 <DockPanel MinHeight="58" Background="Transparent">
                                     <DockPanel.ContextMenu>
-                                        <ContextMenu>
+                                        <ContextMenu Opened="ClipMenu_Opened">
+                                            <MenuItem Header="Move to collection" Tag="move"/>
                                             <MenuItem Header="Remove from this collection" Click="ClipRemoveFromCollection_Click"/>
                                             <Separator/>
                                             <MenuItem Header="🗑 Delete clip from library…" Click="ClipDelete_Click"/>

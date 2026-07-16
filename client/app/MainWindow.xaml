@@ -80,33 +80,54 @@
                                 <TextBlock x:Name="ArmText" Text="HOTKEYS OFF — CLICK TO ARM" FontSize="17"/>
                             </ToggleButton>
                             <Button x:Name="SpeakerButton" Style="{StaticResource BigButton}"
-                                    MinHeight="44" Margin="0,8,0,0" Click="SpeakerButton_Click" Padding="12,2">
+                                    MinHeight="44" Margin="0,8,0,0" Click="SpeakerButton_Click" Padding="12,2"
+                                    ToolTip="Click: where audio goes · Right-click: choose playback device"
+                                    ContextMenuOpening="SpeakerButton_ContextMenuOpening">
+                                <Button.ContextMenu>
+                                    <ContextMenu/>
+                                </Button.ContextMenu>
                                 <TextBlock x:Name="SpeakerText" Text="📡 STREAM ONLY" FontSize="17"/>
                             </Button>
                         </StackPanel>
 
-                        <!-- status + now playing -->
-                        <StackPanel VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse x:Name="ConnDot" Width="16" Height="16" Fill="{StaticResource WarnBrush}"
-                                         VerticalAlignment="Center"/>
-                                <TextBlock x:Name="ConnText" Style="{StaticResource DarkText}" Margin="10,0,14,0"
-                                           FontSize="18" VerticalAlignment="Center" Text="starting…"
+                        <!-- status + now playing, with the master volume top-center (C-41) -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse x:Name="ConnDot" Width="16" Height="16" Fill="{StaticResource WarnBrush}"
+                                             VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="ConnText" Style="{StaticResource DarkText}" Margin="10,0,14,0"
+                                               FontSize="18" VerticalAlignment="Center" Text="starting…"
+                                               Foreground="{StaticResource MutedBrush}"/>
+                                    <Button x:Name="ScanButton" Style="{StaticResource BigButton}" MinWidth="120"
+                                            MinHeight="36" Padding="12,0" Click="ScanButton_Click">
+                                        <TextBlock Text="SCAN" FontSize="15"/>
+                                    </Button>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <TextBlock x:Name="NowPlayingText" FontFamily="{StaticResource DisplayFont}"
+                                               Foreground="{StaticResource TextBrush}" FontSize="30"
+                                               FontWeight="Bold" VerticalAlignment="Center" Text="READY"/>
+                                    <TextBlock x:Name="RemainingText" FontFamily="{StaticResource DisplayFont}"
+                                               FontSize="28" Foreground="{StaticResource IceBrush}"
+                                               Margin="16,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="🔉" FontSize="26" VerticalAlignment="Center"
                                            Foreground="{StaticResource MutedBrush}"/>
-                                <Button x:Name="ScanButton" Style="{StaticResource BigButton}" MinWidth="120"
-                                        MinHeight="36" Padding="12,0" Click="ScanButton_Click">
-                                    <TextBlock Text="SCAN" FontSize="15"/>
-                                </Button>
+                                <Slider x:Name="VolumeSlider" Width="340" Minimum="0" Maximum="100" Value="100"
+                                        Style="{StaticResource BigSlider}"
+                                        VerticalAlignment="Center" Margin="14,0,0,0" IsMoveToPointEnabled="True"
+                                        ValueChanged="Volume_Changed"
+                                        ToolTip="Master volume — booth stream and local playback"/>
                             </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <TextBlock x:Name="NowPlayingText" FontFamily="{StaticResource DisplayFont}"
-                                           Foreground="{StaticResource TextBrush}" FontSize="30"
-                                           FontWeight="Bold" VerticalAlignment="Center" Text="READY"/>
-                                <TextBlock x:Name="RemainingText" FontFamily="{StaticResource DisplayFont}"
-                                           FontSize="28" Foreground="{StaticResource IceBrush}"
-                                           Margin="16,0,0,0" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </StackPanel>
+                        </Grid>
                     </DockPanel>
                 </Border>
 

@@ -12,6 +12,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
 
 namespace RgasSoundboard.Audio;
@@ -42,10 +43,12 @@ public sealed class AudioEngine : IDisposable
     private Voice? _music;
     private readonly List<Voice> _outgoing = new(); // crossfade/fade-out tails
     private double _duck = 1.0; // smoothed toward target each block (C-9)
+    private double _masterTarget = 1.0, _masterCurrent = 1.0; // C-41, smoothed
 
     private int _mode = 4; // start silent
     private bool _userStopped = true; // Space semantics: don't auto-advance after a stop
     private readonly Dictionary<int, Queue<Clip>> _shuffleQueues = new();
+    private readonly Dictionary<int, HashSet<string>> _shufflePoolIds = new(); // pool the bag was built from
     private readonly Dictionary<int, int> _sequentialIndex = new();
 
     // C-38: rolling mono window of the mixed output for the spectrum analyzer
@@ -59,7 +62,10 @@ public sealed class AudioEngine : IDisposable
     private volatile bool _localMuted; // C-28: recording in progress
     private BufferedWaveProvider? _localBuffer;
     private WasapiOut? _localOut;
-    private bool _localOutFailed;
+    private volatile string? _outputDeviceId; // C-40: null = system default
+    private volatile bool _localOutDead; // device failed/changed: render loop re-binds
+    private readonly MMDeviceEnumerator _mmEnum = new();
+    private DeviceNotificationClient? _mmNotify;
     private readonly byte[] _silenceBlock = new byte[BlockFrames * 2 * 2];
 
     public event Action? StateChanged;
@@ -82,6 +88,14 @@ public sealed class AudioEngine : IDisposable
     /// so the soundboard can never record itself. The booth stream is unaffected.</summary>
     public bool LocalMuted { get => _localMuted; set => _localMuted = value; }
 
+    /// <summary>C-41: master gain 0..1 over the entire mix (booth + local),
+    /// smoothed in the render loop to avoid zipper noise.</summary>
+    public double MasterVolume
+    {
+        get => _masterTarget;
+        set => _masterTarget = Math.Clamp(value, 0.0, 1.0);
+    }
+
     public AudioEngine(Config cfg, LibraryStore library, bool startRenderThread = true)
     {
         _cfg = cfg;
@@ -94,6 +108,8 @@ public sealed class AudioEngine : IDisposable
         _pusher.ConnectionChanged += up => ConnectionChanged?.Invoke(up);
         _library.Changed += () => Task.Run(PreloadPools);
         Task.Run(PreloadPools);
+        try { _mmEnum.RegisterEndpointNotificationCallback(_mmNotify = new DeviceNotificationClient(this)); }
+        catch { /* no device notifications: C-40 falls back to failure-driven re-bind */ }
         if (startRenderThread)
             new Thread(RenderLoop) { IsBackground = true, Priority = ThreadPriority.Highest, Name = "rgas-render" }.Start();
     }
@@ -112,30 +128,94 @@ public sealed class AudioEngine : IDisposable
         return Normalizer.LoadWav(mem);
     }
 
-    private void EnsureLocalOut()
+    // --- local output device (C-32/C-40) -----------------------------------------
+
+    public string? OutputDeviceId => _outputDeviceId;
+
+    /// <summary>C-40: all active render devices, for the picker.</summary>
+    public static List<(string Id, string Name)> EnumerateOutputDevices()
+    {
+        var result = new List<(string, string)>();
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                using (device) result.Add((device.ID, device.FriendlyName));
+        }
+        catch { /* no audio subsystem: empty list, UI shows only System default */ }
+        return result;
+    }
+
+    /// <summary>C-40: route local playback to a device (null = system default).</summary>
+    public void SetOutputDevice(string? deviceId)
+    {
+        _outputDeviceId = string.IsNullOrEmpty(deviceId) ? null : deviceId;
+        RecreateLocalOut();
+    }
+
+    /// <summary>C-40 shared with PreviewPlayer: open a device, throwing if gone.</summary>
+    internal static WasapiOut CreateOutput(string? deviceId, int latencyMs)
+    {
+        if (deviceId is null)
+            return new WasapiOut(AudioClientShareMode.Shared, latencyMs);
+        using var enumerator = new MMDeviceEnumerator();
+        var device = enumerator.GetDevice(deviceId);
+        if (device.State != DeviceState.Active)
+        {
+            device.Dispose();
+            throw new InvalidOperationException("selected output device is not active");
+        }
+        return new WasapiOut(device, AudioClientShareMode.Shared, false, latencyMs);
+    }
+
+    private void RecreateLocalOut()
     {
         lock (_gate)
         {
-            if (_localOut is not null || _localOutFailed) return;
+            try { _localOut?.Dispose(); } catch { }
+            _localOut = null;
+            if (_speaker != SpeakerMode.StreamOnly) EnsureLocalOutLocked();
+        }
+    }
+
+    private void EnsureLocalOut()
+    {
+        lock (_gate) EnsureLocalOutLocked();
+    }
+
+    private void EnsureLocalOutLocked()
+    {
+        if (_localOut is not null) return;
+        try
+        {
+            _localBuffer ??= new BufferedWaveProvider(new WaveFormat(Normalizer.SampleRate, 16, 2))
+            {
+                BufferDuration = TimeSpan.FromSeconds(1),
+                DiscardOnBufferOverflow = true,
+            };
+            WasapiOut output;
             try
             {
-                _localBuffer = new BufferedWaveProvider(new WaveFormat(Normalizer.SampleRate, 16, 2))
-                {
-                    BufferDuration = TimeSpan.FromSeconds(1),
-                    DiscardOnBufferOverflow = true,
-                };
-                _localOut = new WasapiOut(AudioClientShareMode.Shared, 60);
-                _localOut.Init(_localBuffer);
-                _localOut.Play();
+                output = CreateOutput(_outputDeviceId, 60);
             }
-            catch
+            catch when (_outputDeviceId is not null)
             {
-                // No usable output device: playback modes silently degrade to
-                // stream-only rather than crashing (C-35 spirit).
-                _localBuffer = null;
-                _localOut = null;
-                _localOutFailed = true;
+                // Selected device unplugged/stale (machine swap): fall back to the
+                // default so sound keeps working (C-40); re-binds if it returns.
+                output = CreateOutput(null, 60);
             }
+            output.Init(_localBuffer);
+            // Device yanked mid-play: flag only (never lock here — the render
+            // loop re-binds; locking could deadlock against Dispose's thread join).
+            output.PlaybackStopped += (_, e) => { if (e.Exception is not null) _localOutDead = true; };
+            output.Play();
+            _localOut = output;
+        }
+        catch
+        {
+            // No usable output device at all: playback modes silently degrade to
+            // stream-only rather than crashing (C-35 spirit); render loop retries.
+            _localOut = null;
         }
     }
 
@@ -181,7 +261,9 @@ public sealed class AudioEngine : IDisposable
                 if (!_music.FadingOut) BeginFade(_music, playing ? _cfg.CrossfadeSeconds : QuickFadeSeconds);
                 else _outgoing.Add(_music);
             }
-            _music = new Voice(clip.Id, clip.Label, data, fadeInSeconds: playing ? _cfg.CrossfadeSeconds : 0);
+            _music = new Voice(clip.Id, clip.Label, data,
+                fadeInSeconds: playing ? _cfg.CrossfadeSeconds : 0,
+                tailFadeSeconds: _cfg.FadeOutSeconds);
             _userStopped = false;
         }
         StateChanged?.Invoke();
@@ -273,7 +355,7 @@ public sealed class AudioEngine : IDisposable
             if (!_music.FadingOut) BeginFade(_music, QuickFadeSeconds);
             else _outgoing.Add(_music);
         }
-        _music = new Voice(clip.Id, clip.Label, data, fadeInSeconds);
+        _music = new Voice(clip.Id, clip.Label, data, fadeInSeconds, _cfg.FadeOutSeconds);
         _userStopped = false;
     }
 
@@ -290,16 +372,26 @@ public sealed class AudioEngine : IDisposable
             return clip;
         }
 
-        // Shuffle: no repeats until the pool is exhausted (C-10)
+        // Shuffle: no repeats until the pool is exhausted (C-10). Pool edits
+        // mid-cycle (a collection checked/unchecked) take effect immediately:
+        // removals drop out of the bag, additions weave in at random positions —
+        // without restarting the cycle, so already-played clips don't repeat early.
         if (!_shuffleQueues.TryGetValue(mode, out var queue)) _shuffleQueues[mode] = queue = new Queue<Clip>();
-        // Rebuild if drained or the pool membership changed since the queue was built
         var poolIds = pool.Select(c => c.Id).ToHashSet();
-        if (queue.Count == 0 || queue.Any(c => !poolIds.Contains(c.Id)))
+        var builtFrom = _shufflePoolIds.TryGetValue(mode, out var prev) ? prev : new HashSet<string>();
+        if (queue.Count > 0 && !poolIds.SetEquals(builtFrom))
         {
-            var shuffled = pool.OrderBy(_ => Random.Shared.Next()).ToList();
+            var remaining = queue.Where(c => poolIds.Contains(c.Id)).ToList();
+            foreach (var added in pool.Where(c => !builtFrom.Contains(c.Id)))
+                remaining.Insert(Random.Shared.Next(remaining.Count + 1), added);
             queue.Clear();
-            foreach (var c in shuffled) queue.Enqueue(c);
+            foreach (var c in remaining) queue.Enqueue(c);
         }
+        if (queue.Count == 0)
+        {
+            foreach (var c in pool.OrderBy(_ => Random.Shared.Next())) queue.Enqueue(c);
+        }
+        _shufflePoolIds[mode] = poolIds;
         return queue.Dequeue();
     }
 
@@ -333,12 +425,21 @@ public sealed class AudioEngine : IDisposable
         long ticksPerBlock = Stopwatch.Frequency / 100; // 10 ms
         var clock = Stopwatch.StartNew();
         long next = clock.ElapsedTicks;
+        int localRetry = 0;
 
         while (!_disposed)
         {
             next += ticksPerBlock;
             RenderBlock(mix);
             EmitBlock(mix, pcm);
+
+            // C-40: re-bind the local output after device failure/change, and
+            // keep retrying (~3 s cadence) while playback modes lack a device.
+            if (_speaker != SpeakerMode.StreamOnly)
+            {
+                if (_localOutDead) { _localOutDead = false; localRetry = 0; RecreateLocalOut(); }
+                else if (_localOut is null && ++localRetry >= 300) { localRetry = 0; EnsureLocalOut(); }
+            }
 
             long wait = next - clock.ElapsedTicks;
             if (wait > 0)
@@ -391,6 +492,13 @@ public sealed class AudioEngine : IDisposable
             _localBuffer?.AddSamples(pcm, 0, pcm.Length); // C-32 (buffer copies internally)
     }
 
+    /// <summary>Selftest access: labels still waiting in a mode's shuffle bag.</summary>
+    internal string[] ShuffleQueueLabelsForTest(int mode)
+    {
+        lock (_gate)
+            return _shuffleQueues.TryGetValue(mode, out var q) ? q.Select(c => c.Label).ToArray() : Array.Empty<string>();
+    }
+
     /// <summary>Selftest access: render exactly one 10 ms block into s16le bytes.</summary>
     internal void RenderOneBlockForTest(float[] mix, byte[] pcm)
     {
@@ -439,6 +547,12 @@ public sealed class AudioEngine : IDisposable
 
             if (needAdvance) StartNextLocked(_mode, fadeInSeconds: 0);
         }
+
+        // C-41: master gain, smoothed toward the slider target
+        _masterCurrent = Lerp(_masterCurrent, _masterTarget);
+        float master = (float)_masterCurrent;
+        if (master < 0.9999f)
+            for (int i = 0; i < mix.Length; i++) mix[i] *= master;
 
         // C-14: soft limiter on the master bus (horn + music can sum > 1.0)
         for (int i = 0; i < mix.Length; i++)
@@ -501,6 +615,37 @@ public sealed class AudioEngine : IDisposable
         _disposed = true;
         _pusher.Dispose();
         _localOut?.Dispose();
+        try { if (_mmNotify is not null) _mmEnum.UnregisterEndpointNotificationCallback(_mmNotify); } catch { }
+        _mmEnum.Dispose();
+    }
+
+    // --- device notifications (C-40) ------------------------------------------------
+    //
+    // Callbacks arrive on a COM thread; they only set the re-bind flag — the
+    // render loop does the actual (re)creation.
+
+    private sealed class DeviceNotificationClient : IMMNotificationClient
+    {
+        private readonly AudioEngine _engine;
+        public DeviceNotificationClient(AudioEngine engine) => _engine = engine;
+
+        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
+        {
+            // Following the system default: hop to the new one live.
+            if (flow == DataFlow.Render && role == Role.Multimedia && _engine._outputDeviceId is null)
+                _engine._localOutDead = true;
+        }
+
+        public void OnDeviceStateChanged(string deviceId, DeviceState newState)
+        {
+            // The explicitly selected device came back: re-bind to it.
+            if (newState == DeviceState.Active && deviceId == _engine._outputDeviceId)
+                _engine._localOutDead = true;
+        }
+
+        public void OnDeviceAdded(string pwstrDeviceId) { }
+        public void OnDeviceRemoved(string deviceId) { }
+        public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
     }
 
     // --- horn (C-9) --------------------------------------------------------------
@@ -648,13 +793,16 @@ public sealed class AudioEngine : IDisposable
         public double RemainingSeconds => Math.Max(0, (_data.Length / 2 - _pos) / (double)Normalizer.SampleRate);
         public double DurationSeconds => _data.Length / 2 / (double)Normalizer.SampleRate;
 
-        public Voice(string clipId, string label, float[] data, double fadeInSeconds)
+        private readonly int _tailFrames; // C-12: natural end always fades
+
+        public Voice(string clipId, string label, float[] data, double fadeInSeconds, double tailFadeSeconds)
         {
             ClipId = clipId;
             Label = label;
             _data = data;
             _env = fadeInSeconds > 0 ? 0 : 1;
             _slopePerFrame = fadeInSeconds > 0 ? 1.0 / (fadeInSeconds * Normalizer.SampleRate) : 0;
+            _tailFrames = Math.Max(1, (int)(tailFadeSeconds * Normalizer.SampleRate));
         }
 
         public void FadeOut(double seconds)
@@ -669,12 +817,16 @@ public sealed class AudioEngine : IDisposable
         public void MixInto(float[] mix, double duckStart, double duckEnd)
         {
             int frames = mix.Length / 2;
-            int availFrames = _data.Length / 2 - _pos;
+            int totalFrames = _data.Length / 2;
+            int availFrames = totalFrames - _pos;
             int n = Math.Min(frames, availFrames);
             for (int f = 0; f < n; f++)
             {
                 double duck = duckStart + (duckEnd - duckStart) * f / frames;
-                float g = (float)(_env * duck);
+                // C-12: runtime tail fade — hot-trimmed clips still end gracefully
+                int remaining = totalFrames - (_pos + f);
+                float tail = remaining < _tailFrames ? (float)remaining / _tailFrames : 1f;
+                float g = (float)(_env * duck) * tail;
                 mix[f * 2] += _data[(_pos + f) * 2] * g;
                 mix[f * 2 + 1] += _data[(_pos + f) * 2 + 1] * g;
                 _env += _slopePerFrame;

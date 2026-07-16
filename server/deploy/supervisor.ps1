@@ -1,6 +1,6 @@
 # rgas-booth supervisor -- SPEC S-12: restart the receiver within 2 s of any
 # exit, forever. Started hidden by the "RGAS Booth Receiver" logon task.
-param([string]$ExePath = "$PSScriptRoot\publish\RgasReceiver.exe")
+param([string]$ExePath = "$PSScriptRoot\RgasReceiver.exe")
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "RGAS Booth Receiver"  # S-12: recognizable in the taskbar

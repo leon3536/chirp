@@ -18,7 +18,17 @@ public sealed class StatusServer
     {
         _snapshot = snapshot;
         _listener = new TcpListener(IPAddress.Any, port);
-        _listener.Start();
+        // Diagnostics port is non-critical: retry a few times, then give up
+        // without taking the receiver down (S-18 spirit — never crash for a port).
+        for (int attempt = 1; ; attempt++)
+        {
+            try { _listener.Start(); break; }
+            catch (Exception ex)
+            {
+                if (attempt >= 5) { Log.Warn($"status endpoint disabled: port {port} unavailable ({ex.Message})"); return; }
+                Thread.Sleep(1000);
+            }
+        }
         new Thread(AcceptLoop) { IsBackground = true, Name = "rgas-status" }.Start();
         Log.Info($"status endpoint on http://0.0.0.0:{port}/status (S-7)");
     }

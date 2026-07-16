@@ -25,4 +25,15 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
+  <!-- The publish output is the complete booth folder: deployment scripts and
+       docs ride along flat next to the exe (SPEC S-11; deploy/ is the source
+       of truth, publish/ is generated and gitignored). -->
+  <ItemGroup>
+    <DeployFiles Include="..\deploy\*.*" />
+    <DeployFiles Include="..\config.example.json" />
+  </ItemGroup>
+  <Target Name="CopyDeployFiles" AfterTargets="Publish">
+    <Copy SourceFiles="@(DeployFiles)" DestinationFolder="$(PublishDir)" />
+  </Target>
+
 </Project>

@@ -167,7 +167,8 @@ public partial class CaptureView : UserControl
         if (_take.Length == 0 || _recorder.IsRecording) return; // C-28
         _preview.Play(_take,
             (int)(SlStart.Value * Normalizer.SampleRate),
-            (int)(SlEnd.Value * Normalizer.SampleRate));
+            (int)(SlEnd.Value * Normalizer.SampleRate),
+            _engine.OutputDeviceId); // C-40: same device as local playback
     }
 
     private void StopPreview_Click(object sender, RoutedEventArgs e) => _preview.Stop();

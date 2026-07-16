@@ -89,6 +89,31 @@ public partial class SoundboardView : UserControl
         }
     }
 
+    /// <summary>C-39: populate the "Move to collection" submenu with every other
+    /// collection, grouped by mode, fresh from the library at open time.</summary>
+    private void ClipMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var menu = (ContextMenu)sender;
+        var moveItem = menu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Tag as string == "move");
+        if (moveItem is null) return;
+        var row = menu.DataContext as ClipRowVM
+                  ?? (menu.PlacementTarget as FrameworkElement)?.DataContext as ClipRowVM;
+        moveItem.Items.Clear();
+        if (row is null || _highlightedCollectionId is null) { moveItem.IsEnabled = false; return; }
+        var targets = _lib.Collections
+            .Where(c => c.Id != _highlightedCollectionId)
+            .OrderBy(c => c.Mode).ThenBy(c => c.Name)
+            .ToList();
+        moveItem.IsEnabled = targets.Count > 0;
+        foreach (var col in targets)
+        {
+            var target = col;
+            var child = new MenuItem { Header = $"mode {target.Mode} · {target.Name}" };
+            child.Click += (_, _) => _lib.MoveClip(row.Id, _highlightedCollectionId!, target.Id);
+            moveItem.Items.Add(child);
+        }
+    }
+
     /// <summary>C-39: clip row context menu — remove from the highlighted collection.</summary>
     private void ClipRemoveFromCollection_Click(object sender, RoutedEventArgs e)
     {

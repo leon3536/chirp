@@ -13,7 +13,7 @@ public sealed class Config
 {
     [JsonPropertyName("booth_ip")] public string BoothIp { get; set; } = "";                    // empty: warn + offer scan (C-34/C-35)
     [JsonPropertyName("booth_port")] public int BoothPort { get; set; } = 4953;
-    [JsonPropertyName("fade_out_seconds")] public double FadeOutSeconds { get; set; } = 2.0;      // C-12
+    [JsonPropertyName("fade_out_seconds")] public double FadeOutSeconds { get; set; } = 1.0;      // C-12
     [JsonPropertyName("crossfade_seconds")] public double CrossfadeSeconds { get; set; } = 2.0;   // C-13
     [JsonPropertyName("horn_duck_db")] public double HornDuckDb { get; set; } = -6.0;             // C-9
     [JsonPropertyName("music_target_lufs")] public double MusicTargetLufs { get; set; } = -16.0;  // C-25

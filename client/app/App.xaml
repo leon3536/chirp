@@ -222,13 +222,41 @@
             <Setter Property="FontSize" Value="17"/>
             <Setter Property="Template">
                 <Setter.Value>
+                    <!-- Role-aware: submenu headers get an arrow + PART_Popup (C-39 move submenu) -->
                     <ControlTemplate TargetType="MenuItem">
-                        <Border x:Name="bd" Background="Transparent" CornerRadius="8" Padding="14,9">
-                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="False"/>
-                        </Border>
+                        <Grid>
+                            <Border x:Name="bd" Background="Transparent" CornerRadius="8" Padding="14,9">
+                                <DockPanel>
+                                    <TextBlock x:Name="arrow" DockPanel.Dock="Right" Text="❯" FontSize="13"
+                                               Foreground="{StaticResource MutedBrush}" Margin="14,2,0,0"
+                                               VerticalAlignment="Center" Visibility="Collapsed"/>
+                                    <ContentPresenter ContentSource="Header" RecognizesAccessKey="False"
+                                                      VerticalAlignment="Center"/>
+                                </DockPanel>
+                            </Border>
+                            <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="-2" VerticalOffset="-6"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                <Border Background="#161E2B" BorderBrush="{StaticResource HairlineBrush}"
+                                        BorderThickness="1" CornerRadius="12" Padding="6" Margin="0,0,8,8">
+                                    <Border.Effect>
+                                        <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="4" Opacity="0.5"/>
+                                    </Border.Effect>
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="520">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="arrow" Property="Visibility" Value="Visible"/>
+                            </Trigger>
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="bd" Property="Background" Value="#2E3D8BFD"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -300,6 +328,63 @@
                                 <Setter TargetName="bd" Property="Background" Value="#14FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============ Big touch slider (C-41 master volume) ============ -->
+        <Style x:Key="BigSlider" TargetType="Slider">
+            <Setter Property="MinHeight" Value="56"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Track x:Name="PART_Track" VerticalAlignment="Center">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Grid Background="Transparent" MinHeight="56">
+                                                <Border Height="14" CornerRadius="7,0,0,7" VerticalAlignment="Center"
+                                                        Background="{StaticResource AccentGradient}"/>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Grid Background="Transparent" MinHeight="56">
+                                                <Border Height="14" CornerRadius="0,7,7,0" VerticalAlignment="Center"
+                                                        Background="#182233"/>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Width="86" Height="52" Focusable="False">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border CornerRadius="26" Background="{StaticResource AccentGradient}"
+                                                    BorderBrush="#66FFFFFF" BorderThickness="1">
+                                                <Border.Effect>
+                                                    <DropShadowEffect Color="#000000" BlurRadius="10" ShadowDepth="2" Opacity="0.45"/>
+                                                </Border.Effect>
+                                                <TextBlock Text="{Binding Value,
+                                                                  RelativeSource={RelativeSource AncestorType=Slider},
+                                                                  StringFormat={}{0:0}%}"
+                                                           Foreground="White" FontWeight="Bold" FontSize="19"
+                                                           FontFamily="{StaticResource DisplayFont}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>

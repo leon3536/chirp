@@ -34,6 +34,11 @@ public sealed class LibraryData
     [JsonPropertyName("mode_order")] public Dictionary<string, string> ModeOrder { get; set; } = new();
     // C-32: last chosen speaker mode, persisted across restarts (null: config default)
     [JsonPropertyName("speaker_mode")] public string? SpeakerMode { get; set; }
+    // C-40: chosen playback device id (null/empty: system default). Machine-specific;
+    // a stale id after a machine swap falls back to default at open time.
+    [JsonPropertyName("output_device")] public string? OutputDevice { get; set; }
+    // C-41: master volume 0..1 (null: 100 %)
+    [JsonPropertyName("master_volume")] public double? MasterVolume { get; set; }
 }
 
 public sealed class LibraryStore
@@ -193,6 +198,20 @@ public sealed class LibraryStore
         Changed?.Invoke();
     }
 
+    /// <summary>C-39 move: leave one collection, join another, one save.</summary>
+    public void MoveClip(string clipId, string fromCollectionId, string toCollectionId)
+    {
+        lock (_gate)
+        {
+            var clip = _data.Clips.FirstOrDefault(c => c.Id == clipId);
+            if (clip is null) return;
+            clip.Collections.Remove(fromCollectionId);
+            if (!clip.Collections.Contains(toCollectionId)) clip.Collections.Add(toCollectionId);
+            Save();
+        }
+        Changed?.Invoke();
+    }
+
     public void DeleteClip(string clipId)
     {
         string? wav = null;
@@ -215,5 +234,26 @@ public sealed class LibraryStore
     {
         lock (_gate) { _data.SpeakerMode = mode; Save(); }
         // No Changed event: purely an output-routing preference, not library content.
+    }
+
+    // --- C-41: persisted master volume ------------------------------------------------
+    public double? GetMasterVolume() { lock (_gate) return _data.MasterVolume; }
+
+    public void SetMasterVolume(double volume)
+    {
+        lock (_gate) { _data.MasterVolume = Math.Clamp(volume, 0, 1); Save(); }
+        // No Changed event: output level, not library content.
+    }
+
+    // --- C-40: persisted playback device --------------------------------------------
+    public string? GetOutputDevice()
+    {
+        lock (_gate) return string.IsNullOrEmpty(_data.OutputDevice) ? null : _data.OutputDevice;
+    }
+
+    public void SetOutputDevice(string? deviceId)
+    {
+        lock (_gate) { _data.OutputDevice = deviceId; Save(); }
+        // No Changed event: output routing, not library content.
     }
 }

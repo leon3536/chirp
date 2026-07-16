@@ -19,15 +19,19 @@ remove it completely.
 dotnet publish app -c Release -r win-x64 -o publish
 ```
 
-Produces `publish\RgasReceiver.exe` (single file, runtime included).
+Produces `publish\` as the **complete booth folder**: `RgasReceiver.exe`
+(single file, runtime included) plus `install.ps1`, `supervisor.ps1`,
+`diagnose.ps1`, `config.example.json`, and `readme.txt` copied in flat
+(sources live in [deploy/](deploy/)).
 
 ## Install on the booth machine
 
-1. Copy the `server\` folder (with `publish\`) onto the booth machine.
-2. As Administrator:
+1. Copy the `publish\` folder onto the booth machine (e.g. `C:\RGAS`).
+   `readme.txt` inside it is the on-machine copy of these instructions.
+2. As Administrator, from inside that folder:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1
+   powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
 
    This is idempotent (S-11) and configures: firewall allow (4953, 1780),
@@ -64,8 +68,8 @@ Manager) — the supervisor restarts it with the new values within 2 s.
   SOURCE and SIGNAL indicator lights, buffer gauge, live L/R levels, counters
   for connections / sound bites / underruns, connection history, live log.
   Read-only by design — nothing on it can break audio.
-- `scripts\diagnose.ps1` — startup shortcut, process, ports, `/status`,
-  firewall, WiFi power state, recent logs. Read-only.
+- `diagnose.ps1` (in the deployed folder) — startup shortcut, process, ports,
+  `/status`, firewall, WiFi power state, recent logs. Read-only.
 - `http://<booth-ip>:1780/status` — live JSON: state (waiting/filling/playing),
   connected source, buffer fill, underrun count, output device, uptime.
 - `publish\logs\receiver.log` / `supervisor.log` — connection events,

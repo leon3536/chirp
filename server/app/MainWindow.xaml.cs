@@ -4,6 +4,7 @@
 // status colors validated against the card surface, peak-hold ticks, a
 // de-emphasized buffer sparkline, and a breathing glow only when ON AIR.
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
@@ -63,6 +64,18 @@ public partial class MainWindow : Window
         var state = buffer.State;
         bool sourceUp = buffer.SourceConnected;
 
+        // S-18: a port-bind fault shows here, never as a modal dialog
+        if (_core.Fault is string fault)
+        {
+            StateText.Text = "Port in use";
+            StateSubText.Text = fault;
+            var crit = (SolidColorBrush)FindResource("CriticalBrush");
+            StateDot.Fill = crit; TitleDot.Fill = crit; HeroWash.Background = crit;
+            ((DropShadowEffect)StateDot.Effect).Color = crit.Color;
+            _lastState = (BufferState)(-1); // force a repaint when the fault clears
+            return;
+        }
+
         if (state != _lastState)
         {
             _lastState = state;
@@ -98,6 +111,9 @@ public partial class MainWindow : Window
                     ref _holdL, ref _holdUntilL);
         UpdateMeter(buffer.PeakR, MeterRTrack, MeterRFill, MeterRBack, MeterRHold, MeterRText,
                     ref _holdR, ref _holdUntilR);
+
+        // footer: device can change at runtime (S-6a)
+        DeviceText.Text = $"output — {_core.Player.DeviceName}";
 
         // tiles (S-17a/b)
         ConnCountText.Text = _core.TotalConnections.ToString();
@@ -283,13 +299,38 @@ public partial class MainWindow : Window
 
     private static string LocalIp()
     {
+        // Preferred: the source IP the OS would use to leave this box. No packets
+        // are sent; it just resolves the route. Works without real internet as
+        // long as a gateway exists.
         try
         {
-            // UDP "connect" trick: no packets sent, just picks the outbound interface.
             using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
             s.Connect("8.8.8.8", 65530);
-            return ((IPEndPoint)s.LocalEndPoint!).Address.ToString();
+            var ip = ((IPEndPoint)s.LocalEndPoint!).Address;
+            if (!IPAddress.IsLoopback(ip)) return ip.ToString();
         }
-        catch { return "127.0.0.1"; }
+        catch { /* no route/gateway — fall through */ }
+
+        // Fallback for a gateway-less isolated LAN (RGAS must work fully offline):
+        // first up, non-loopback IPv4 on a real adapter.
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
+                foreach (var addr in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (addr.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    if (IPAddress.IsLoopback(addr.Address)) continue;
+                    var b = addr.Address.GetAddressBytes();
+                    if (b[0] == 169 && b[1] == 254) continue; // skip APIPA link-local (dead adapters)
+                    return addr.Address.ToString();
+                }
+            }
+        }
+        catch { /* fall through */ }
+
+        return "127.0.0.1";
     }
 }

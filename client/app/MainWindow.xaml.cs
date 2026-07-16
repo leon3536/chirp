@@ -22,6 +22,9 @@ public partial class MainWindow : Window
 
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _eqTimer;
+    private readonly DispatcherTimer _autoScanTimer;
+    private readonly DispatcherTimer _volumeSaveTimer; // C-41: debounce persists while dragging
+    private bool _autoScanBusy;
     private readonly Rectangle[] _eqBars = new Rectangle[EqBands];
     private readonly Rectangle[] _eqCaps = new Rectangle[EqBands];
     private readonly double[] _eqShown = new double[EqBands];
@@ -36,9 +39,22 @@ public partial class MainWindow : Window
         Soundboard.Init(App.Engine, App.Lib);
         Capture.Init(App.Engine, App.Lib, App.Cfg);
 
+        // C-40: restore the persisted playback device BEFORE the speaker mode
+        // creates the local output (stale ids fall back to default inside the engine)
+        App.Engine.SetOutputDevice(App.Lib.GetOutputDevice());
+
         // C-32: restore the persisted speaker mode (config default on first run)
         App.Engine.Speaker = Config.ParseSpeaker(App.Lib.GetSpeakerMode()) ?? App.Cfg.DefaultSpeaker;
         UpdateSpeakerButton();
+
+        // C-41: restore the persisted master volume (slider drives the engine)
+        _volumeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _volumeSaveTimer.Tick += (_, _) =>
+        {
+            _volumeSaveTimer.Stop();
+            App.Lib.SetMasterVolume(App.Engine.MasterVolume);
+        };
+        VolumeSlider.Value = (App.Lib.GetMasterVolume() ?? 1.0) * 100;
 
         // C-6: global hook routing (installed on the UI thread; callbacks arrive here)
         App.Hook.SuppressCheck = () => IsActive &&
@@ -61,6 +77,13 @@ public partial class MainWindow : Window
         _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _uiTimer.Tick += (_, _) => RefreshStatus();
         _uiTimer.Start();
+
+        // C-34: automatic discovery — while the booth is unreachable, background-
+        // scan the local subnets and adopt whatever answers on :4953. The
+        // configured address is only a first candidate, never a trap.
+        _autoScanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _autoScanTimer.Tick += async (_, _) => await AutoScanAsync();
+        _autoScanTimer.Start();
 
         // C-38: spectrum refresh, faster cadence for smooth motion
         _eqTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
@@ -143,6 +166,16 @@ public partial class MainWindow : Window
             : (Brush)FindResource("PanelGradient");
     }
 
+    // --- master volume (C-41) -------------------------------------------------------
+
+    private void Volume_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_volumeSaveTimer is null) return; // during InitializeComponent
+        App.Engine.MasterVolume = VolumeSlider.Value / 100.0; // % shown on the thumb itself
+        _volumeSaveTimer.Stop();
+        _volumeSaveTimer.Start(); // persist once the dragging settles
+    }
+
     // --- speaker (C-32) ----------------------------------------------------------
 
     private void SpeakerButton_Click(object sender, RoutedEventArgs e)
@@ -168,7 +201,58 @@ public partial class MainWindow : Window
         };
     }
 
+    /// <summary>C-40: right-click the Speaker button — pick the playback device.</summary>
+    private void SpeakerButton_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var menu = SpeakerButton.ContextMenu!;
+        menu.Items.Clear();
+        menu.Items.Add(new MenuItem { Header = "PLAYBACK DEVICE", IsEnabled = false, FontSize = 14 });
+        menu.Items.Add(new Separator());
+
+        var current = App.Engine.OutputDeviceId;
+        void AddChoice(string? id, string name)
+        {
+            bool selected = id == current;
+            var item = new MenuItem { Header = $"{(selected ? "✓" : "    ")}  {name}" };
+            item.Click += (_, _) =>
+            {
+                App.Engine.SetOutputDevice(id);   // re-binds live, booth unaffected
+                App.Lib.SetOutputDevice(id ?? ""); // persisted (C-40)
+            };
+            menu.Items.Add(item);
+        }
+
+        AddChoice(null, "System default (follows Windows)");
+        foreach (var (id, name) in AudioEngine.EnumerateOutputDevices())
+            AddChoice(id, name);
+    }
+
     // --- booth scan (C-34) ---------------------------------------------------------
+
+    /// <summary>C-34 automatic discovery: runs only while disconnected; adopts and
+    /// persists a live booth silently. Manual SCAN (with confirm) stays available.</summary>
+    private async Task AutoScanAsync()
+    {
+        if (_autoScanBusy || App.Engine.BoothConnected) return;
+        _autoScanBusy = true;
+        try
+        {
+            var found = await BoothDiscovery.ScanAsync(App.Cfg.BoothPort, TimeSpan.FromMilliseconds(400));
+            if (App.Engine.BoothConnected || found.Count == 0) return; // reconnected meanwhile / nothing there
+            // Prefer a host that isn't the already-failing configured address.
+            var pick = found.FirstOrDefault(ip => ip != App.Cfg.BoothIp) ?? found[0];
+            if (pick == App.Cfg.BoothIp) return; // it IS the configured one; the pusher will get it
+            App.Cfg.BoothIp = pick;
+            try { App.Cfg.Save(AppContext.BaseDirectory); } catch { }
+            App.Engine.SetBoothTarget(pick, App.Cfg.BoothPort);
+            ConnText.Text = $"auto-scan found booth {pick} — connecting…";
+        }
+        catch { /* discovery is best-effort; next tick retries */ }
+        finally
+        {
+            _autoScanBusy = false;
+        }
+    }
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
