@@ -6,9 +6,8 @@ publish/
 # Rinkside site config (copy from config.example.json)
 client/config.json
 
-# Announcer prototype: API key + generated audio stay out of git
-experiments/announcer-test/config.json
-experiments/announcer-test/out-*.mp3
+# Experiments / prototypes stay local (API keys, spikes, generated audio)
+experiments/
 
 # Audio never enters the repo for copyright reasons (client SPEC C-21).
 # The committed goal-horn asset is the single exception (C-20).
