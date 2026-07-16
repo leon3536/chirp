@@ -33,6 +33,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="250"/>
                 <ColumnDefinition Width="300"/>
             </Grid.ColumnDefinitions>
 
@@ -63,8 +64,17 @@
                              Minimum="0" Maximum="1"/>
             </Grid>
 
+            <!-- C-42: announcer popup (hotkey A) -->
+            <Button x:Name="BtnAnnounce" Grid.Column="2" Style="{StaticResource BigButton}"
+                    Margin="0,0,14,0" Click="Announce_Click">
+                <StackPanel>
+                    <TextBlock Text="🎙 ANNOUNCE" FontSize="26" HorizontalAlignment="Center"/>
+                    <TextBlock Text="or press A" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
             <!-- C-9: hold-to-sound, mouse and touch -->
-            <Button x:Name="BtnHorn" Grid.Column="2" Style="{StaticResource BigButton}"
+            <Button x:Name="BtnHorn" Grid.Column="3" Style="{StaticResource BigButton}"
                     Background="{StaticResource HornGradient}" BorderBrush="#66F0424C"
                     PreviewMouseLeftButtonDown="Horn_Down" PreviewMouseLeftButtonUp="Horn_Up"
                     MouseLeave="Horn_Up" LostMouseCapture="Horn_Up"

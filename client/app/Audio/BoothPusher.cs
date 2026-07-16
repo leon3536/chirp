@@ -34,7 +34,7 @@ public sealed class BoothPusher : IDisposable
     {
         _host = host?.Trim() ?? "";
         _port = port;
-        new Thread(Run) { IsBackground = true, Name = "rgas-push" }.Start();
+        new Thread(Run) { IsBackground = true, Name = "rgas-push", Priority = ThreadPriority.AboveNormal }.Start();
     }
 
     /// <summary>C-34: point at a newly configured/discovered booth without a restart.</summary>

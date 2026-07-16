@@ -15,6 +15,7 @@ public partial class App : Application
     public static LibraryStore Lib { get; private set; } = null!;
     public static AudioEngine Engine { get; private set; } = null!;
     public static GlobalKeyboardHook Hook { get; private set; } = null!;
+    public static AnnouncerService Announcer { get; private set; } = null!;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -34,6 +35,7 @@ public partial class App : Application
         Lib = new LibraryStore(baseDir);     // C-19
         Engine = new AudioEngine(Cfg, Lib);
         Hook = new GlobalKeyboardHook();     // C-6 (installed on the UI thread)
+        Announcer = new AnnouncerService(Cfg); // C-42
 
         DispatcherUnhandledException += (_, args) =>
         {

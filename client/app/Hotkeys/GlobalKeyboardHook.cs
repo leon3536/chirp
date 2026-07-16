@@ -17,7 +17,7 @@ using System.Runtime.InteropServices;
 
 namespace RgasSoundboard.Hotkeys;
 
-public enum HotkeyAction { Space, Mode1, Mode2, Mode3, Mode4, Horn }
+public enum HotkeyAction { Space, Mode1, Mode2, Mode3, Mode4, Horn, Announce }
 
 public sealed class GlobalKeyboardHook : IDisposable
 {
@@ -62,6 +62,7 @@ public sealed class GlobalKeyboardHook : IDisposable
         0x33 or 0x63 => HotkeyAction.Mode3,
         0x34 or 0x64 => HotkeyAction.Mode4,
         0x48 => HotkeyAction.Horn, // H
+        0x41 => HotkeyAction.Announce, // A (C-42)
         _ => null,
     };
 

@@ -31,6 +31,7 @@ public static class SelfTest
             TestEngine(tempDir);
             TestShuffleWeave(tempDir);
             TestTailFadeAndMasterVolume(tempDir);
+            TestAnnouncer(tempDir);
             TestPusher();
         }
         catch (Exception ex)
@@ -265,6 +266,143 @@ public static class SelfTest
         engine.MasterVolume = 0;
         for (int b = 0; b < 40; b++) BlockLevel();
         Check(BlockLevel() < 1e-4, "master volume 0 silences output");
+    }
+
+    // --- C-42/C-43: announcer tone, ducking, key-at-rest (no network) ----------------
+
+    private static void TestAnnouncer(string tempDir)
+    {
+        // Tone heuristic (C-42)
+        (string text, bool dramatic)[] cases =
+        {
+            ("GOOOOAL!!!", true),
+            ("HUGE SAVE BY THE GOALIE!!!", true),
+            ("Let's gooooo", true),
+            ("Zamboni break, five minutes", false),
+            ("Next game starts at 8 PM!", false),
+            ("Please clear the ice", false),
+        };
+        foreach (var (text, expected) in cases)
+            Check(AnnouncerService.IsDramatic(text) == expected,
+                $"tone: \"{text}\" -> {(expected ? "dramatic" : "plain")}");
+
+        // Stage directions (C-42): (…) steers, never spoken; tone from spoken words
+        var (script1, dir1) = AnnouncerService.ParseDirections("(imitate a movie trailer voice) Sunday, SUNDAY");
+        Check(script1 == "Sunday, SUNDAY" && dir1 == "imitate a movie trailer voice",
+            "parentheses parse into directions + script");
+        var (script2, dir2) = AnnouncerService.ParseDirections("(sad) (slow) game cancelled");
+        Check(script2 == "game cancelled" && dir2 == "sad; slow", "multiple directions join");
+        var (script3, dir3) = AnnouncerService.ParseDirections("plain call, no parens!");
+        Check(script3 == "plain call, no parens!" && dir3 is null, "no parens -> no directions");
+        Check(!AnnouncerService.IsDramatic(AnnouncerService.ParseDirections("(SCREAM LIKE CRAZY!!) welcome everyone").Script),
+            "caps inside directions don't force dramatic tone");
+        Check(AnnouncerService.ParseDirections("(only directions here)").Script.Length == 0,
+            "all-directions text yields empty script");
+
+        // Verbatim guard (C-42): transcript vs script
+        Check(AnnouncerService.OnScript("Blue Devils win! Hasta la vista, baby!",
+                "Blue Devils win — hasta la vista, baby!"),
+            "on-script transcript passes");
+        Check(AnnouncerService.OnScript("GOOOOAL BY NUMBER NINETY-SEVEN!!!",
+                "Goal by number ninety-seven!"),
+            "elongation and punctuation tolerated");
+        Check(!AnnouncerService.OnScript("Blue Devils win!",
+                "I know you want that iconic terminator tone, I will say it exactly as it is: Blue Devils win!"),
+            "meta-commentary preamble is flagged off-script");
+        Check(!AnnouncerService.OnScript("Please clear the ice, the zamboni is coming out",
+                "Welcome everyone to the game tonight"),
+            "unrelated speech is flagged off-script");
+        Check(AnnouncerService.OnScript("anything", null), "missing transcript assumed on-script");
+
+        // Personalities (C-42): three, unique ids and voices, safe default
+        Check(AnnouncerService.Personalities.Length == 3
+              && AnnouncerService.Personalities.Select(p => p.Id).Distinct().Count() == 3
+              && AnnouncerService.Personalities.Select(p => p.OpenAiVoice).Distinct().Count() == 3,
+            "three distinct announcer personalities");
+        Check(AnnouncerService.GetPersonality(null).Id == "deep_bass"
+              && AnnouncerService.GetPersonality("bogus").Id == "deep_bass"
+              && AnnouncerService.GetPersonality("energetic").Id == "energetic",
+            "personality lookup defaults to deep bass");
+
+        // Key at rest is DPAPI-wrapped and round-trips (C-43)
+        var cfgKey = new Config();
+        cfgKey.SetAnnouncerApiKey("sk-test-roundtrip-1234567890");
+        Check(cfgKey.AnnouncerApiKeyStored.StartsWith("dpapi:"), "announcer key stored encrypted");
+        Check(cfgKey.AnnouncerApiKey == "sk-test-roundtrip-1234567890", "announcer key round-trips");
+
+        // Speech-like (high crest factor) material must actually REACH the loud
+        // target — peak-guarded normalize can't, the soft-limited path must
+        var bursty = new float[Normalizer.SampleRate * 2 * 4]; // 4 s stereo
+        for (int f = 0; f < bursty.Length / 2; f++)
+        {
+            bool burst = (f / (Normalizer.SampleRate / 4)) % 3 != 2; // 2-on 1-off cadence
+            float v = burst ? 0.25f * MathF.Sin(2 * MathF.PI * 220 * f / Normalizer.SampleRate) : 0;
+            bursty[f * 2] = v;
+            bursty[f * 2 + 1] = v;
+        }
+        AnnouncerService.NormalizeSpeech(bursty, -6.0);
+        double loud = Normalizer.MeasureLufs(bursty);
+        Check(Math.Abs(loud - (-6.0)) < 1.5, $"speech normalize reaches -6 LUFS (got {loud:0.0})");
+
+        // gpt-audio WAVs carry streaming placeholder chunk sizes (0xFFFFFFFF):
+        // decode must survive them (the bug behind "Stream length must be non-negative")
+        var wavPath = Path.Combine(tempDir, "stream-hdr.wav");
+        Normalizer.EncodeWav16(wavPath, Sine(440, 0.3f, 1.0));
+        var wavBytes = File.ReadAllBytes(wavPath);
+        int dataAt = -1; // locate the "data" chunk id (fmt chunk size varies)
+        for (int i = 12; i < wavBytes.Length - 8; i++)
+            if (wavBytes[i] == 'd' && wavBytes[i + 1] == 'a' && wavBytes[i + 2] == 't' && wavBytes[i + 3] == 'a')
+            { dataAt = i; break; }
+        for (int i = 0; i < 4; i++) { wavBytes[4 + i] = 0xFF; wavBytes[dataAt + 4 + i] = 0xFF; } // RIFF + data sizes
+        var decoded = AnnouncerService.Decode(wavBytes, "wav");
+        Check(Math.Abs(decoded.Length - Normalizer.SampleRate * 2) < 4800,
+            $"streaming-header wav decodes ({decoded.Length} samples)");
+
+        // Announcement ducks music by announcer_duck_db and recovers (C-42)
+        var dir = Path.Combine(tempDir, "ann");
+        Directory.CreateDirectory(dir);
+        var cfg = new Config();
+        var lib = new LibraryStore(dir);
+        var col = lib.AddCollection("ann", 1);
+        Normalizer.EncodeWav16(Path.Combine(lib.AudioDir, "bed.wav"), Sine(330, 0.4f, 6.0));
+        lib.AddClip("bed", "bed.wav", 6.0, new[] { col.Id });
+
+        using var engine = new AudioEngine(cfg, lib, startRenderThread: false);
+        var mix = new float[480 * 2];
+        var pcm = new byte[480 * 2 * 2];
+        double Level(int settleBlocks)
+        {
+            for (int b = 0; b < settleBlocks; b++) engine.RenderOneBlockForTest(mix, pcm);
+            engine.RenderOneBlockForTest(mix, pcm);
+            double sum = 0;
+            foreach (var s in mix) sum += Math.Abs(s);
+            return sum / mix.Length;
+        }
+
+        engine.SetMode(1);
+        engine.ToggleSpace();
+        double full = Level(50);
+        engine.PlayAnnouncement(new float[Normalizer.SampleRate * 2]); // 1 s of silence isolates the duck
+        Check(engine.AnnouncementActive, "announcement reports active");
+        double ducked = Level(40);
+        double expectedDuck = Math.Pow(10, cfg.AnnouncerDuckDb / 20.0);
+        Check(Math.Abs(ducked / full - expectedDuck) < 0.08,
+            $"announcement ducks music to {expectedDuck:0.00} ({ducked / full:0.00})");
+        double recovered = Level(120); // announcement over: duck releases
+        Check(!engine.AnnouncementActive && recovered / full > 0.9,
+            $"music recovers after announcement ({recovered / full:0.00})");
+
+        // Pre-roll (C-42): the first ~150 ms of an announcement is silence, so a
+        // buffer hiccup at onset can never clip the first syllable
+        engine.ToggleSpace(); // stop the music bed
+        Level(150); // fade completes
+        engine.PlayAnnouncement(Sine(440, 0.4f, 0.5));
+        double preRoll = 0;
+        for (int b = 0; b < 10; b++) preRoll += Level(0); // first 100 ms
+        double onset = 0;
+        for (int b = 0; b < 20; b++) onset += Level(0); // next 200 ms
+        Check(preRoll < 1e-4 && onset > 0.05,
+            $"announcement pre-roll: silent lead-in then voice ({preRoll:0.00000} -> {onset:0.00})");
     }
 
     // --- C-29/C-31: booth push against a fake snapserver -------------------------------

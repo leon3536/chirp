@@ -61,6 +61,9 @@ public partial class SoundboardView : UserControl
         UpdateOrderText(mode);
     }
 
+    private void Announce_Click(object sender, RoutedEventArgs e) =>
+        (Window.GetWindow(this) as MainWindow)?.OpenAnnouncer(); // C-42
+
     private void Horn_Down(object sender, MouseButtonEventArgs e) { _engine.HornDown(); BtnHorn.CaptureMouse(); }
     private void Horn_Up(object sender, RoutedEventArgs e) { _engine.HornUp(); BtnHorn.ReleaseMouseCapture(); }
     private void Horn_TouchDown(object sender, TouchEventArgs e) { _engine.HornDown(); e.Handled = true; }

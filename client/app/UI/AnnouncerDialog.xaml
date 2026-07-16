@@ -1,0 +1,96 @@
+<Window x:Class="RgasSoundboard.UI.AnnouncerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Announcer" Width="920" Height="560"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        FontFamily="{StaticResource BodyFont}"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <!-- C-42/C-43: announcement entry. While open, ALL soundboard hotkeys are
+         suppressed (MainWindow gates the global hook; this is a modal dialog). -->
+    <Border Style="{StaticResource Card}" Margin="14">
+        <Grid Margin="26,18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,14">
+                <Button x:Name="BtnClose" DockPanel.Dock="Right" Style="{StaticResource BigButton}"
+                        MinWidth="64" MinHeight="44" Click="Close_Click">
+                    <TextBlock Text="✕" FontSize="20"/>
+                </Button>
+                <TextBlock Text="🎙 ANNOUNCER" FontFamily="{StaticResource DisplayFont}" FontSize="30"
+                           FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+            </DockPanel>
+
+            <!-- C-43: friendly first-run key entry, never an error dialog -->
+            <StackPanel x:Name="KeyPanel" Grid.Row="1" VerticalAlignment="Center" Visibility="Collapsed">
+                <TextBlock Text="The announcer needs an API key before it can speak."
+                           FontSize="24" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                <TextBlock Margin="0,10,0,22" FontSize="18" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                           Text="Paste an OpenAI key (sk-…) or an ElevenLabs key (sk_…). The provider is detected automatically, and the key is stored encrypted on this machine — it never syncs in readable form."/>
+                <DockPanel>
+                    <Button x:Name="BtnSaveKey" DockPanel.Dock="Right" Style="{StaticResource BigButton}"
+                            MinWidth="180" Margin="14,0,0,0" Click="SaveKey_Click">
+                        <TextBlock Text="SAVE KEY" FontSize="20"/>
+                    </Button>
+                    <PasswordBox x:Name="PbKey" FontSize="20" MinHeight="52" Padding="12,8"
+                                 Background="#0C1119" Foreground="{StaticResource TextBrush}"
+                                 BorderBrush="{StaticResource BorderBrush}"
+                                 CaretBrush="{StaticResource IceBrush}"
+                                 VerticalContentAlignment="Center"/>
+                </DockPanel>
+                <TextBlock x:Name="KeyStatus" Margin="2,12,0,0" FontSize="18"
+                           Foreground="{StaticResource WarnBrush}" Text=""/>
+            </StackPanel>
+
+            <!-- Entry surface -->
+            <Grid x:Name="EntryPanel" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- C-42: personality picker — big touch buttons with indicator lights -->
+                <UniformGrid Grid.Row="0" x:Name="PanelPersonalities" Columns="3" Margin="0,0,0,14"/>
+
+                <TextBox Grid.Row="1" x:Name="TxtAnnounce" Style="{StaticResource WatermarkTextBox}"
+                         FontSize="26" MinHeight="86" TextWrapping="Wrap" AcceptsReturn="False"
+                         VerticalContentAlignment="Center"
+                         Tag="Type the announcement… CAPS/!!/streeetched = DRAMATIC · (parentheses) = stage directions, not spoken"
+                         TextChanged="TxtAnnounce_TextChanged" KeyDown="TxtAnnounce_KeyDown"/>
+
+                <DockPanel Grid.Row="2" Margin="0,14,0,0">
+                    <Button x:Name="BtnAnnounce" DockPanel.Dock="Right" Style="{StaticResource BigButton}"
+                            MinWidth="260" MinHeight="56" Click="Announce_Click">
+                        <TextBlock x:Name="AnnounceText" Text="🎙 ANNOUNCE  (Enter)" FontSize="22"/>
+                    </Button>
+                    <Button x:Name="BtnChangeKey" DockPanel.Dock="Right" Style="{StaticResource BigButton}"
+                            MinWidth="170" MinHeight="56" Margin="0,0,14,0" Visibility="Collapsed"
+                            Click="ChangeKey_Click">
+                        <TextBlock Text="CHANGE KEY" FontSize="18"/>
+                    </Button>
+                    <TextBlock x:Name="ToneBadge" Text="· plain delivery" FontSize="22"
+                               FontFamily="{StaticResource DisplayFont}"
+                               Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                </DockPanel>
+
+                <TextBlock Grid.Row="3" x:Name="StatusText" Margin="2,12,0,0" FontSize="18"
+                           Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text=""/>
+
+                <DockPanel Grid.Row="4" Margin="0,16,0,0">
+                    <TextBlock DockPanel.Dock="Top" Text="RECENT — tap to replay (no cost)"
+                               Style="{StaticResource PanelHeader}" Margin="2,0,0,8"/>
+                    <ListBox x:Name="LbHistory" Background="Transparent" BorderThickness="0"
+                             ItemContainerStyle="{StaticResource ClipItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             MouseUp="History_MouseUp"/>
+                </DockPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

@@ -39,6 +39,8 @@ public sealed class LibraryData
     [JsonPropertyName("output_device")] public string? OutputDevice { get; set; }
     // C-41: master volume 0..1 (null: 100 %)
     [JsonPropertyName("master_volume")] public double? MasterVolume { get; set; }
+    // C-42: last chosen announcer personality id (null: default)
+    [JsonPropertyName("announcer_personality")] public string? AnnouncerPersonality { get; set; }
 }
 
 public sealed class LibraryStore
@@ -243,6 +245,15 @@ public sealed class LibraryStore
     {
         lock (_gate) { _data.MasterVolume = Math.Clamp(volume, 0, 1); Save(); }
         // No Changed event: output level, not library content.
+    }
+
+    // --- C-42: persisted announcer personality ------------------------------------------
+    public string? GetAnnouncerPersonality() { lock (_gate) return _data.AnnouncerPersonality; }
+
+    public void SetAnnouncerPersonality(string id)
+    {
+        lock (_gate) { _data.AnnouncerPersonality = id; Save(); }
+        // No Changed event: operator preference, not library content.
     }
 
     // --- C-40: persisted playback device --------------------------------------------

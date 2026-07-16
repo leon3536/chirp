@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _autoScanTimer;
     private readonly DispatcherTimer _volumeSaveTimer; // C-41: debounce persists while dragging
     private bool _autoScanBusy;
+    private bool _announcerOpen; // C-42: gates ALL hotkeys while the popup is up
     private readonly Rectangle[] _eqBars = new Rectangle[EqBands];
     private readonly Rectangle[] _eqCaps = new Rectangle[EqBands];
     private readonly double[] _eqShown = new double[EqBands];
@@ -56,9 +57,11 @@ public partial class MainWindow : Window
         };
         VolumeSlider.Value = (App.Lib.GetMasterVolume() ?? 1.0) * 100;
 
-        // C-6: global hook routing (installed on the UI thread; callbacks arrive here)
-        App.Hook.SuppressCheck = () => IsActive &&
-            (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox);
+        // C-6/C-7/C-42: global hook routing (installed on the UI thread). While the
+        // announcer popup is open, EVERY hotkey passes through untouched so typing
+        // 1/H/Space/A can never trigger soundboard actions.
+        App.Hook.SuppressCheck = () => _announcerOpen || (IsActive &&
+            (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox));
         App.Hook.Hotkey += OnHotkey;
 
         // Disarmed: plain focused-window keys still work (C-3: hotkeys are an accelerator)
@@ -120,6 +123,26 @@ public partial class MainWindow : Window
                 _hornHeldByKeyboard = isDown;
                 if (isDown) App.Engine.HornDown(); else App.Engine.HornUp();
                 break;
+            case HotkeyAction.Announce when isDown:
+                // Never block inside the low-level hook callback (Windows would
+                // silently drop the hook) — open the modal on the next dispatch.
+                Dispatcher.BeginInvoke(OpenAnnouncer);
+                break;
+        }
+    }
+
+    /// <summary>C-42: 🎙 popup — modal; all hotkeys suppressed while it is open.</summary>
+    public void OpenAnnouncer()
+    {
+        if (_announcerOpen) return;
+        _announcerOpen = true;
+        try
+        {
+            new UI.AnnouncerDialog(App.Announcer, App.Engine, App.Cfg, App.Lib) { Owner = this }.ShowDialog();
+        }
+        finally
+        {
+            _announcerOpen = false;
         }
     }
 
@@ -131,6 +154,7 @@ public partial class MainWindow : Window
         Key.D3 or Key.NumPad3 => HotkeyAction.Mode3,
         Key.D4 or Key.NumPad4 => HotkeyAction.Mode4,
         Key.H => HotkeyAction.Horn,
+        Key.A => HotkeyAction.Announce,
         _ => null,
     };
 

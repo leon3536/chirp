@@ -41,8 +41,9 @@ public sealed class AudioEngine : IDisposable
     private readonly Horn _hornMachine; // C-9: attack / loop-while-held / tail
 
     private Voice? _music;
+    private Voice? _announcement; // C-42: mixed above music, never ducked itself
     private readonly List<Voice> _outgoing = new(); // crossfade/fade-out tails
-    private double _duck = 1.0; // smoothed toward target each block (C-9)
+    private double _duck = 1.0; // smoothed toward target each block (C-9/C-42)
     private double _masterTarget = 1.0, _masterCurrent = 1.0; // C-41, smoothed
 
     private int _mode = 4; // start silent
@@ -67,6 +68,8 @@ public sealed class AudioEngine : IDisposable
     private readonly MMDeviceEnumerator _mmEnum = new();
     private DeviceNotificationClient? _mmNotify;
     private readonly byte[] _silenceBlock = new byte[BlockFrames * 2 * 2];
+    private byte[]? _localPcm; // dithered copy for the local device (keep-alive)
+    private uint _ditherSeed = 0x2545F491;
 
     public event Action? StateChanged;
     public bool BoothConnected => _pusher.IsConnected;
@@ -205,6 +208,11 @@ public sealed class AudioEngine : IDisposable
                 output = CreateOutput(null, 60);
             }
             output.Init(_localBuffer);
+            // Prime a ~150 ms cushion so a render-thread hiccup (GC during an
+            // announcement decode) can't underrun the local device at a voice onset.
+            _localBuffer.ClearBuffer();
+            var prime = new byte[Normalizer.SampleRate * 2 * 2 * 15 / 100];
+            _localBuffer.AddSamples(prime, 0, prime.Length);
             // Device yanked mid-play: flag only (never lock here — the render
             // loop re-binds; locking could deadlock against Dispose's thread join).
             output.PlaybackStopped += (_, e) => { if (e.Exception is not null) _localOutDead = true; };
@@ -316,6 +324,28 @@ public sealed class AudioEngine : IDisposable
     {
         lock (_gate) _hornMachine.Up();
         StateChanged?.Invoke();
+    }
+
+    /// <summary>C-42: play an announcement above the music (which ducks). A new
+    /// announcement replaces a running one. Samples: 48 kHz stereo, pre-normalized.</summary>
+    public void PlayAnnouncement(float[] samples)
+    {
+        // 150 ms silent pre-roll: output-buffer jitter (e.g. a GC pause from the
+        // just-finished decode) can never clip the first syllable.
+        const int preRollFrames = Normalizer.SampleRate * 15 / 100;
+        var padded = new float[preRollFrames * 2 + samples.Length];
+        Array.Copy(samples, 0, padded, preRollFrames * 2, samples.Length);
+        lock (_gate)
+        {
+            // Tiny tail fade only — announcements must keep their last word intact.
+            _announcement = new Voice("__ann__", "ANNOUNCEMENT", padded, fadeInSeconds: 0, tailFadeSeconds: 0.05);
+        }
+        StateChanged?.Invoke();
+    }
+
+    public bool AnnouncementActive
+    {
+        get { lock (_gate) return _announcement is not null && !_announcement.Done; }
     }
 
     public EngineSnapshot Snapshot()
@@ -488,8 +518,23 @@ public sealed class AudioEngine : IDisposable
             _pusher.Enqueue(block); // C-29/C-30: every block, silence included
         }
 
-        if (speaker != SpeakerMode.StreamOnly && !_localMuted)
-            _localBuffer?.AddSamples(pcm, 0, pcm.Length); // C-32 (buffer copies internally)
+        if (speaker != SpeakerMode.StreamOnly && !_localMuted && _localBuffer is not null)
+        {
+            // Keep-alive dither (~-68 dBFS): gated outputs (Bluetooth headsets,
+            // eco-mode speakers) mute on digital silence and chop the first sound
+            // after quiet. Never hand the local device true silence.
+            _localPcm ??= new byte[pcm.Length];
+            Buffer.BlockCopy(pcm, 0, _localPcm, 0, pcm.Length);
+            for (int i = 0; i < _localPcm.Length; i += 2)
+            {
+                _ditherSeed = _ditherSeed * 1664525 + 1013904223;
+                int v = (short)(_localPcm[i] | (_localPcm[i + 1] << 8)) + (int)((_ditherSeed >> 24) & 15) - 8;
+                v = Math.Clamp(v, short.MinValue, short.MaxValue);
+                _localPcm[i] = (byte)v;
+                _localPcm[i + 1] = (byte)(v >> 8);
+            }
+            _localBuffer.AddSamples(_localPcm, 0, _localPcm.Length); // C-32 (buffer copies internally)
+        }
     }
 
     /// <summary>Selftest access: labels still waiting in a mode's shuffle bag.</summary>
@@ -517,9 +562,13 @@ public sealed class AudioEngine : IDisposable
         bool needAdvance = false;
         lock (_gate)
         {
-            // C-9: smooth duck toward target while the horn is live (held or tailing)
+            // C-9/C-42: smooth duck toward the deepest active target — horn (held or
+            // tailing) and/or a running announcement.
             bool hornLive = _hornMachine.Sounding;
-            double duckTarget = hornLive ? Math.Pow(10, _cfg.HornDuckDb / 20.0) : 1.0;
+            bool annLive = _announcement is not null && !_announcement.Done;
+            double duckTarget = 1.0;
+            if (hornLive) duckTarget = Math.Min(duckTarget, Math.Pow(10, _cfg.HornDuckDb / 20.0));
+            if (annLive) duckTarget = Math.Min(duckTarget, Math.Pow(10, _cfg.AnnouncerDuckDb / 20.0));
 
             if (_music is not null)
             {
@@ -544,6 +593,12 @@ public sealed class AudioEngine : IDisposable
             _duck = Lerp(_duck, duckTarget);
 
             _hornMachine.MixInto(mix); // horn is never ducked or faded (C-9)
+
+            if (_announcement is not null)
+            {
+                _announcement.MixInto(mix, 1.0, 1.0); // announcement never ducked (C-42)
+                if (_announcement.Done) _announcement = null;
+            }
 
             if (needAdvance) StartNextLocked(_mode, fadeInSeconds: 0);
         }

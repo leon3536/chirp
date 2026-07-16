@@ -29,8 +29,53 @@ public sealed class Config
     // in the library store and wins — "stream_only" | "playback_and_stream" | "playback_only"
     [JsonPropertyName("default_speaker_mode")] public string DefaultSpeakerMode { get; set; } = "stream_only";
 
+    // C-42/C-43: AI announcer. Key at rest is DPAPI-encrypted ("dpapi:..."); a
+    // plaintext value is accepted once and re-encrypted on the next save.
+    [JsonPropertyName("announcer_api_key")] public string AnnouncerApiKeyStored { get; set; } = "";
+    [JsonPropertyName("announcer_openai_voice")] public string AnnouncerOpenAiVoice { get; set; } = "onyx";
+    [JsonPropertyName("announcer_openai_model")] public string AnnouncerOpenAiModel { get; set; } = "gpt-audio";
+    [JsonPropertyName("announcer_elevenlabs_voice")] public string AnnouncerElevenLabsVoice { get; set; } = "pNInz6obpgDQGcFmaJgB";
+    [JsonPropertyName("announcer_elevenlabs_model")] public string AnnouncerElevenLabsModel { get; set; } = "eleven_v3";
+    [JsonPropertyName("announcer_duck_db")] public double AnnouncerDuckDb { get; set; } = -10.0;
+    [JsonPropertyName("announcer_target_lufs")] public double AnnouncerTargetLufs { get; set; } = -6.0;
+
     public bool IsContinuous(int mode) =>
         !ModeAdvance.TryGetValue(mode.ToString(), out var v) || v != "single_shot";
+
+    // --- C-43: announcer key, DPAPI at rest --------------------------------------
+    private const string DpapiPrefix = "dpapi:";
+
+    [JsonIgnore]
+    public string AnnouncerApiKey
+    {
+        get
+        {
+            var stored = AnnouncerApiKeyStored;
+            if (string.IsNullOrWhiteSpace(stored)) return "";
+            if (!stored.StartsWith(DpapiPrefix, StringComparison.Ordinal)) return stored.Trim();
+            try
+            {
+                return System.Text.Encoding.UTF8.GetString(
+                    System.Security.Cryptography.ProtectedData.Unprotect(
+                        Convert.FromBase64String(stored[DpapiPrefix.Length..]),
+                        null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+            }
+            catch
+            {
+                return ""; // key from another machine/user: behaves like "not configured"
+            }
+        }
+    }
+
+    public void SetAnnouncerApiKey(string plainKey)
+    {
+        AnnouncerApiKeyStored = string.IsNullOrWhiteSpace(plainKey)
+            ? ""
+            : DpapiPrefix + Convert.ToBase64String(
+                System.Security.Cryptography.ProtectedData.Protect(
+                    System.Text.Encoding.UTF8.GetBytes(plainKey.Trim()),
+                    null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+    }
 
     public SpeakerMode DefaultSpeaker => ParseSpeaker(DefaultSpeakerMode) ?? SpeakerMode.StreamOnly;
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "rgas-source config (client SPEC C-33). Copy to config.json next to RgasSoundboard.exe. booth_ip may be left empty - the app warns and offers SCAN (C-34), and a successful scan persists the address here. mode_advance: 'continuous' (auto-advance, loops) or 'single_shot' (stop at track end). default_speaker_mode is the fresh-install output routing ('stream_only' | 'playback_and_stream' | 'playback_only'); the operator's last choice is persisted in the library store and wins (C-32).",
+  "_comment": "rgas-source config (client SPEC C-33). Copy to config.json next to RgasSoundboard.exe. booth_ip may be left empty - the app warns and offers SCAN (C-34), and a successful scan persists the address here. mode_advance: 'continuous' (auto-advance, loops) or 'single_shot' (stop at track end). default_speaker_mode is the fresh-install output routing ('stream_only' | 'playback_and_stream' | 'playback_only'); the operator's last choice is persisted in the library store and wins (C-32). announcer_api_key (C-42/C-43): paste via the in-app popup - it is stored DPAPI-encrypted per machine/user; an OpenAI key (sk-...) uses announcer_openai_*, an ElevenLabs key (sk_...) uses announcer_elevenlabs_*.",
   "booth_ip": "",
   "booth_port": 4953,
   "fade_out_seconds": 1.0,
@@ -8,5 +8,12 @@
   "music_target_lufs": -16.0,
   "horn_target_lufs": -11.0,
   "mode_advance": { "1": "continuous", "2": "single_shot", "3": "continuous" },
-  "default_speaker_mode": "stream_only"
+  "default_speaker_mode": "stream_only",
+  "announcer_api_key": "",
+  "announcer_openai_voice": "onyx",
+  "announcer_openai_model": "gpt-audio",
+  "announcer_elevenlabs_voice": "pNInz6obpgDQGcFmaJgB",
+  "announcer_elevenlabs_model": "eleven_v3",
+  "announcer_duck_db": -10.0,
+  "announcer_target_lufs": -6.0
 }
