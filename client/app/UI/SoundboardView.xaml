@@ -33,8 +33,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="250"/>
-                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="740"/>
             </Grid.ColumnDefinitions>
 
             <Button x:Name="BtnPlay" Grid.Column="0" Style="{StaticResource BigButton}" Click="Play_Click">
@@ -43,6 +42,7 @@
 
             <Grid Grid.Column="1" VerticalAlignment="Center" Margin="32,0">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
@@ -62,28 +62,52 @@
                 </DockPanel>
                 <ProgressBar Grid.Row="1" x:Name="Progress" Height="12" Margin="0,14,0,0"
                              Minimum="0" Maximum="1"/>
+                <!-- C-44: next-up preview + skip -->
+                <DockPanel Grid.Row="2" Margin="0,12,0,0">
+                    <Button x:Name="BtnSkip" DockPanel.Dock="Right" Style="{StaticResource BigButton}"
+                            MinWidth="130" MinHeight="38" Click="Skip_Click"
+                            ToolTip="Skip the next-up track — doesn't touch what's playing now (K)">
+                        <TextBlock Text="⏭ SKIP (K)" FontSize="16"/>
+                    </Button>
+                    <TextBlock x:Name="NextUpText" FontFamily="{StaticResource DisplayFont}"
+                               FontSize="18" Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               Margin="0,0,20,0"/>
+                </DockPanel>
             </Grid>
 
-            <!-- C-42: announcer popup (hotkey A) -->
-            <Button x:Name="BtnAnnounce" Grid.Column="2" Style="{StaticResource BigButton}"
-                    Margin="0,0,14,0" Click="Announce_Click">
-                <StackPanel>
-                    <TextBlock Text="🎙 ANNOUNCE" FontSize="26" HorizontalAlignment="Center"/>
-                    <TextBlock Text="or press A" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+            <!-- C-42/C-45: announcer, open mic, horn - equal width (UniformGrid) -->
+            <UniformGrid Grid.Column="2" Columns="3">
+                <!-- C-42: announcer popup (hotkey A) -->
+                <Button x:Name="BtnAnnounce" Style="{StaticResource BigButton}"
+                        Margin="0,0,14,0" Click="Announce_Click">
+                    <StackPanel>
+                        <TextBlock Text="🎙 AI ANNOUNCEMENT" FontSize="22" HorizontalAlignment="Center"/>
+                        <TextBlock Text="or press A" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
 
-            <!-- C-9: hold-to-sound, mouse and touch -->
-            <Button x:Name="BtnHorn" Grid.Column="3" Style="{StaticResource BigButton}"
-                    Background="{StaticResource HornGradient}" BorderBrush="#66F0424C"
-                    PreviewMouseLeftButtonDown="Horn_Down" PreviewMouseLeftButtonUp="Horn_Up"
-                    MouseLeave="Horn_Up" LostMouseCapture="Horn_Up"
-                    TouchDown="Horn_TouchDown" TouchUp="Horn_TouchUp" LostTouchCapture="Horn_TouchUp">
-                <StackPanel>
-                    <TextBlock Text="📢 HORN" FontSize="32" HorizontalAlignment="Center"/>
-                    <TextBlock Text="HOLD — or hold H" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+                <!-- C-45: open mic - live pass-through, toggled -->
+                <Button x:Name="BtnOpenMic" Style="{StaticResource BigButton}"
+                        Margin="0,0,14,0" Click="OpenMic_Click">
+                    <StackPanel>
+                        <TextBlock x:Name="OpenMicText" Text="🎤 OPEN MIC" FontSize="22" HorizontalAlignment="Center"/>
+                        <TextBlock Text="or press Ctrl+O" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
+                <!-- C-9: hold-to-sound, mouse and touch -->
+                <Button x:Name="BtnHorn" Style="{StaticResource BigButton}"
+                        Background="{StaticResource HornGradient}" BorderBrush="#66F0424C"
+                        PreviewMouseLeftButtonDown="Horn_Down" PreviewMouseLeftButtonUp="Horn_Up"
+                        MouseLeave="Horn_Up" LostMouseCapture="Horn_Up"
+                        TouchDown="Horn_TouchDown" TouchUp="Horn_TouchUp" LostTouchCapture="Horn_TouchUp">
+                    <StackPanel>
+                        <TextBlock Text="📢 HORN" FontSize="26" HorizontalAlignment="Center"/>
+                        <TextBlock Text="HOLD — or hold H" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </UniformGrid>
         </Grid>
 
         <!-- Collection browser (C-37) -->

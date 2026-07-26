@@ -73,11 +73,12 @@
                             <Canvas x:Name="EqCanvas" ClipToBounds="True"/>
                         </Border>
 
-                        <!-- C-6 arm + C-32 speaker, stacked to make room for the EQ -->
+                        <!-- C-6 background hotkeys + C-32 speaker, stacked to make room for the EQ -->
                         <StackPanel DockPanel.Dock="Right" Width="330" Margin="18,0,0,0">
-                            <ToggleButton x:Name="ArmToggle" Style="{StaticResource BigButton}"
-                                          MinHeight="44" Click="ArmToggle_Click" Padding="12,2">
-                                <TextBlock x:Name="ArmText" Text="HOTKEYS OFF — CLICK TO ARM" FontSize="17"/>
+                            <ToggleButton x:Name="BackgroundHotkeysToggle" Style="{StaticResource BigButton}"
+                                          MinHeight="50" Click="BackgroundHotkeysToggle_Click" Padding="12,2">
+                                <TextBlock x:Name="BackgroundHotkeysText" Text="BACKGROUND HOTKEYS OFF&#10;CLICK TO ENABLE"
+                                           FontSize="15" TextWrapping="Wrap" TextAlignment="Center"/>
                             </ToggleButton>
                             <Button x:Name="SpeakerButton" Style="{StaticResource BigButton}"
                                     MinHeight="44" Margin="0,8,0,0" Click="SpeakerButton_Click" Padding="12,2"

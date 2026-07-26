@@ -21,8 +21,9 @@ copy that folder along with the exe to move machines (C-19).
 - **Modes**: `1` PUMP UP · `2` STOP-IN-ACTION · `3` RELAX · `4` SILENCE
 - **Space**: play / fade-out (play-clock semantics)
 - **H (hold)**: goal horn — loops while held, finishes naturally on release
-- **ARM HOTKEYS** (top-right): keys work even when another app has focus (C-6).
-  Scorekeeping is mouse/touch-only, so nothing collides.
+- **BACKGROUND HOTKEYS** (top-right): keys work even when another app has focus
+  (C-6) — this is a passive subscription, not a capture, so the focused app
+  (e.g. a scorekeeping program) still receives every key exactly as normal.
 - **Speaker** button: STREAM ONLY (game default) → PLAYBACK + STREAM → PLAYBACK ONLY (C-32)
 - No booth? The app shows a warning and everything else still works (C-35).
 
@@ -62,3 +63,15 @@ dotnet publish -c Release -o ..\publish        # the single portable exe (C-2)
 ```
 
 Audio never enters git except the embedded horn assets (C-20/C-21).
+
+## Deploying to QA
+
+```powershell
+.\deploy-qa.ps1            # publish + copy the exe into the QA folder
+.\deploy-qa.ps1 -Launch    # ...and run it from there afterward
+```
+
+Publishes the exe and copies it into the QA install (OneDrive, "Always keep on
+this device"), which holds the real `config.json` (with the announcer API key)
+and real `library\`. The script only ever overwrites the exe/pdb — it never
+touches `config.json` or `library\` there.

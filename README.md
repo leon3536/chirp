@@ -68,8 +68,9 @@ The zero-training surface the volunteer actually touches. It runs on any Windows
    and fades out on the next press. Same rhythm as running a play clock.
 3. **Hold `H` for the goal horn** — a hot-mastered horn fires instantly over the
    music, ducking it, and finishes clean when you let go.
-4. **Arm hotkeys** (one button) so `Space` / `1`–`4` / `H` work even while you're
-   clicking around the scorekeeping app — the keys never collide.
+4. **Background hotkeys** (one button) so `Space` / `1`–`4` / `H` work even while
+   you're clicking around the scorekeeping app — a passive subscription, so the
+   scorekeeping app still gets every key too.
 
 Everything else — collections, shuffle vs. in-order, the connection light, master
 volume, and the STOP button — is one glance away and impossible to break. Worst

@@ -25,7 +25,7 @@ public enum SpeakerMode { StreamOnly, PlaybackAndStream, PlaybackOnly }
 public sealed record EngineSnapshot(
     int Mode, bool IsPlaying, string NowPlayingLabel, string NowPlayingClipId,
     double RemainingSeconds, double DurationSeconds, bool HornActive, bool PoolEmpty,
-    SpeakerMode Speaker, bool BoothConnected, string BoothStatus);
+    SpeakerMode Speaker, bool BoothConnected, string BoothStatus, string NextLabel, bool MicOpen);
 
 public sealed class AudioEngine : IDisposable
 {
@@ -42,6 +42,8 @@ public sealed class AudioEngine : IDisposable
 
     private Voice? _music;
     private Voice? _announcement; // C-42: mixed above music, never ducked itself
+    private MicMonitor? _mic; // C-45: live pass-through, mixed above music, never ducked itself
+    private volatile bool _micOpen;
     private readonly List<Voice> _outgoing = new(); // crossfade/fade-out tails
     private double _duck = 1.0; // smoothed toward target each block (C-9/C-42)
     private double _masterTarget = 1.0, _masterCurrent = 1.0; // C-41, smoothed
@@ -75,6 +77,9 @@ public sealed class AudioEngine : IDisposable
     public bool BoothConnected => _pusher.IsConnected;
     public string BoothStatus => _pusher.Status;
     public event Action<bool>? ConnectionChanged;
+    /// <summary>C-31a: another client took over the booth — forwarded from
+    /// BoothPusher so the window can tell the operator and close the app.</summary>
+    public event Action? BoothKicked;
 
     public SpeakerMode Speaker
     {
@@ -109,6 +114,7 @@ public sealed class AudioEngine : IDisposable
             LoadHornAsset("horn_tail.wav")); // C-20
         _pusher = new BoothPusher(cfg.BoothIp, cfg.BoothPort);
         _pusher.ConnectionChanged += up => ConnectionChanged?.Invoke(up);
+        _pusher.Kicked += () => BoothKicked?.Invoke();
         _library.Changed += () => Task.Run(PreloadPools);
         Task.Run(PreloadPools);
         try { _mmEnum.RegisterEndpointNotificationCallback(_mmNotify = new DeviceNotificationClient(this)); }
@@ -348,6 +354,41 @@ public sealed class AudioEngine : IDisposable
         get { lock (_gate) return _announcement is not null && !_announcement.Done; }
     }
 
+    public bool MicOpen => _micOpen;
+
+    /// <summary>Ctrl+O (C-45): toggles live pass-through of the default
+    /// recording device — mixed over music (ducked like the AI announcer)
+    /// until closed again. No usable input device: fails silently, mic stays
+    /// closed (C-35 spirit).</summary>
+    public void ToggleMic()
+    {
+        lock (_gate)
+        {
+            if (_micOpen)
+            {
+                _mic?.Dispose();
+                _mic = null;
+                _micOpen = false;
+            }
+            else
+            {
+                try
+                {
+                    var mic = new MicMonitor();
+                    mic.Open();
+                    _mic = mic;
+                    _micOpen = true;
+                }
+                catch
+                {
+                    _mic = null;
+                    _micOpen = false;
+                }
+            }
+        }
+        StateChanged?.Invoke();
+    }
+
     public EngineSnapshot Snapshot()
     {
         lock (_gate)
@@ -364,8 +405,24 @@ public sealed class AudioEngine : IDisposable
                 PoolEmpty: _mode != 4 && _library.Pool(_mode).Count == 0,
                 Speaker: _speaker,
                 BoothConnected: _pusher.IsConnected,
-                BoothStatus: _pusher.Status);
+                BoothStatus: _pusher.Status,
+                NextLabel: _mode == 4 ? "" : PeekNextLocked(_mode)?.Label ?? "",
+                MicOpen: _micOpen);
         }
+    }
+
+    /// <summary>K (skip, C-44): discards the previewed next-up track from the
+    /// queue (shuffle bag / sequential index) without touching whatever is
+    /// currently playing — the preview simply advances to a new "next".
+    /// SILENCE or an empty pool: no-op.</summary>
+    public void Skip()
+    {
+        lock (_gate)
+        {
+            if (_mode == 4) return;
+            NextClipLocked(_mode); // discard: advances the shuffle bag / sequential index
+        }
+        StateChanged?.Invoke();
     }
 
     // --- pool / advance ----------------------------------------------------------
@@ -402,10 +459,36 @@ public sealed class AudioEngine : IDisposable
             return clip;
         }
 
-        // Shuffle: no repeats until the pool is exhausted (C-10). Pool edits
-        // mid-cycle (a collection checked/unchecked) take effect immediately:
-        // removals drop out of the bag, additions weave in at random positions —
-        // without restarting the cycle, so already-played clips don't repeat early.
+        var queue = RefreshShuffleQueueLocked(mode, pool);
+        return queue.Dequeue();
+    }
+
+    /// <summary>C-44: what NextClipLocked will return next, without consuming
+    /// it — for the "next up" preview. Refills/re-syncs the shuffle bag exactly
+    /// like NextClipLocked so the preview always matches what Skip/advance will
+    /// actually play.</summary>
+    private Clip? PeekNextLocked(int mode)
+    {
+        var pool = _library.Pool(mode); // C-18
+        if (pool.Count == 0) return null;
+
+        if (_library.GetOrder(mode) == "sequential") // C-10
+        {
+            int idx = _sequentialIndex.TryGetValue(mode, out var i) ? i : 0;
+            return pool[idx % pool.Count];
+        }
+
+        var queue = RefreshShuffleQueueLocked(mode, pool);
+        return queue.Count > 0 ? queue.Peek() : null;
+    }
+
+    /// <summary>Shuffle: no repeats until the pool is exhausted (C-10). Pool edits
+    /// mid-cycle (a collection checked/unchecked) take effect immediately:
+    /// removals drop out of the bag, additions weave in at random positions —
+    /// without restarting the cycle, so already-played clips don't repeat early.
+    /// Returns the (possibly refilled) queue for mode; never dequeues.</summary>
+    private Queue<Clip> RefreshShuffleQueueLocked(int mode, IReadOnlyList<Clip> pool)
+    {
         if (!_shuffleQueues.TryGetValue(mode, out var queue)) _shuffleQueues[mode] = queue = new Queue<Clip>();
         var poolIds = pool.Select(c => c.Id).ToHashSet();
         var builtFrom = _shufflePoolIds.TryGetValue(mode, out var prev) ? prev : new HashSet<string>();
@@ -422,7 +505,7 @@ public sealed class AudioEngine : IDisposable
             foreach (var c in pool.OrderBy(_ => Random.Shared.Next())) queue.Enqueue(c);
         }
         _shufflePoolIds[mode] = poolIds;
-        return queue.Dequeue();
+        return queue;
     }
 
     private void BeginFade(Voice voice, double seconds)
@@ -566,9 +649,11 @@ public sealed class AudioEngine : IDisposable
             // tailing) and/or a running announcement.
             bool hornLive = _hornMachine.Sounding;
             bool annLive = _announcement is not null && !_announcement.Done;
+            bool micLive = _micOpen;
             double duckTarget = 1.0;
             if (hornLive) duckTarget = Math.Min(duckTarget, Math.Pow(10, _cfg.HornDuckDb / 20.0));
             if (annLive) duckTarget = Math.Min(duckTarget, Math.Pow(10, _cfg.AnnouncerDuckDb / 20.0));
+            if (micLive) duckTarget = Math.Min(duckTarget, Math.Pow(10, _cfg.OpenMicDuckDb / 20.0));
 
             if (_music is not null)
             {
@@ -599,6 +684,8 @@ public sealed class AudioEngine : IDisposable
                 _announcement.MixInto(mix, 1.0, 1.0); // announcement never ducked (C-42)
                 if (_announcement.Done) _announcement = null;
             }
+
+            if (_micOpen) _mic?.MixInto(mix, 1.0f); // C-45: open mic never ducked itself
 
             if (needAdvance) StartNextLocked(_mode, fadeInSeconds: 0);
         }
@@ -670,6 +757,7 @@ public sealed class AudioEngine : IDisposable
         _disposed = true;
         _pusher.Dispose();
         _localOut?.Dispose();
+        _mic?.Dispose();
         try { if (_mmNotify is not null) _mmEnum.UnregisterEndpointNotificationCallback(_mmNotify); } catch { }
         _mmEnum.Dispose();
     }

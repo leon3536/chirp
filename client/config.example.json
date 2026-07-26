@@ -1,5 +1,5 @@
 {
-  "_comment": "rgas-source config (client SPEC C-33). Copy to config.json next to RgasSoundboard.exe. booth_ip may be left empty - the app warns and offers SCAN (C-34), and a successful scan persists the address here. mode_advance: 'continuous' (auto-advance, loops) or 'single_shot' (stop at track end). default_speaker_mode is the fresh-install output routing ('stream_only' | 'playback_and_stream' | 'playback_only'); the operator's last choice is persisted in the library store and wins (C-32). announcer_api_key (C-42/C-43): paste via the in-app popup - it is stored DPAPI-encrypted per machine/user; an OpenAI key (sk-...) uses announcer_openai_*, an ElevenLabs key (sk_...) uses announcer_elevenlabs_*.",
+  "_comment": "rgas-source config (client SPEC C-33). Copy to config.json next to RgasSoundboard.exe. booth_ip may be left empty - the app warns and offers SCAN (C-34), and a successful scan persists the address here. mode_advance: 'continuous' (auto-advance, loops) or 'single_shot' (stop at track end). default_speaker_mode is the fresh-install output routing ('stream_only' | 'playback_and_stream' | 'playback_only'); the operator's last choice is persisted in the library store and wins (C-32). announcer_api_key (C-42/C-43): paste via the in-app popup or set directly here - stored in plaintext so the same config.json works across every machine; keep the folder private. An OpenAI key (sk-...) uses announcer_openai_*, an ElevenLabs key (sk_...) uses announcer_elevenlabs_*. open_mic_duck_db (C-45): how much OPEN MIC (Ctrl+O) ducks the music while live, using the system default recording device.",
   "booth_ip": "",
   "booth_port": 4953,
   "fade_out_seconds": 1.0,
@@ -15,5 +15,6 @@
   "announcer_elevenlabs_voice": "pNInz6obpgDQGcFmaJgB",
   "announcer_elevenlabs_model": "eleven_v3",
   "announcer_duck_db": -10.0,
-  "announcer_target_lufs": -6.0
+  "announcer_target_lufs": -6.0,
+  "open_mic_duck_db": -10.0
 }

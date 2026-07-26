@@ -1,6 +1,6 @@
-// rgas-source main window — SPEC C-4 (tabs), C-6/C-7 (arm toggle + hotkey
-// routing), C-31/C-35 (connection warning), C-32 (speaker button), C-34 (scan),
-// C-38 (live spectrum analyzer).
+// rgas-source main window — SPEC C-4 (tabs), C-6/C-7 (background hotkeys
+// toggle + hotkey routing), C-31/C-35 (connection warning), C-31a (kicked-by-booth dialog),
+// C-32 (speaker button), C-34 (scan), C-38 (live spectrum analyzer).
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -57,14 +57,21 @@ public partial class MainWindow : Window
         };
         VolumeSlider.Value = (App.Lib.GetMasterVolume() ?? 1.0) * 100;
 
-        // C-6/C-7/C-42: global hook routing (installed on the UI thread). While the
+        // C-6/C-7/C-42: background hotkeys routing (installed on the UI thread).
+        // The hook never consumes a key — it's a passive subscription — so the
+        // foreground app always receives Space/1-4/H/A normally too. While the
         // announcer popup is open, EVERY hotkey passes through untouched so typing
         // 1/H/Space/A can never trigger soundboard actions.
         App.Hook.SuppressCheck = () => _announcerOpen || (IsActive &&
             (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox));
         App.Hook.Hotkey += OnHotkey;
 
-        // Disarmed: plain focused-window keys still work (C-3: hotkeys are an accelerator)
+        // C-31a: the booth deliberately replaced us with another client — stop
+        // pretending we'll reconnect and tell the operator plainly. Fires on the
+        // push thread, so hop to the UI thread before touching WPF.
+        App.Engine.BoothKicked += () => Dispatcher.BeginInvoke(OnBoothKicked);
+
+        // Background hotkeys off: plain focused-window keys still work (C-3: hotkeys are an accelerator)
         PreviewKeyDown += OnPreviewKeyDown;
         PreviewKeyUp += OnPreviewKeyUp;
 
@@ -108,7 +115,7 @@ public partial class MainWindow : Window
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
-    // --- hotkeys (C-6..C-9) -----------------------------------------------------
+    // --- hotkeys (C-6..C-9, C-44, C-45) ------------------------------------------
 
     private void OnHotkey(HotkeyAction action, bool isDown)
     {
@@ -128,6 +135,8 @@ public partial class MainWindow : Window
                 // silently drop the hook) — open the modal on the next dispatch.
                 Dispatcher.BeginInvoke(OpenAnnouncer);
                 break;
+            case HotkeyAction.Skip when isDown: App.Engine.Skip(); break;
+            case HotkeyAction.OpenMic when isDown: App.Engine.ToggleMic(); break;
         }
     }
 
@@ -146,6 +155,18 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>C-31a: the booth told us another client took over (S-3a kick
+    /// marker). Modal, no auto-retry underneath — the operator acknowledges and
+    /// the app closes, avoiding a silent ping-pong with the client that replaced us.</summary>
+    private void OnBoothKicked()
+    {
+        MessageBox.Show(this,
+            "Your session has ended because another client has connected to the RGAS server. " +
+            "Please make sure no one else is using the system.",
+            "RGAS session ended", MessageBoxButton.OK, MessageBoxImage.Warning);
+        Application.Current.Shutdown();
+    }
+
     private static HotkeyAction? MapKey(Key key) => key switch
     {
         Key.Space => HotkeyAction.Space,
@@ -155,12 +176,14 @@ public partial class MainWindow : Window
         Key.D4 or Key.NumPad4 => HotkeyAction.Mode4,
         Key.H => HotkeyAction.Horn,
         Key.A => HotkeyAction.Announce,
+        Key.K => HotkeyAction.Skip,
+        Key.O when Keyboard.Modifiers.HasFlag(ModifierKeys.Control) => HotkeyAction.OpenMic,
         _ => null,
     };
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (App.Hook.Armed) return; // the hook already consumed our keys
+        if (App.Hook.Enabled) return; // the background hook already routes these
         if (e.IsRepeat) { if (MapKey(e.Key) is not null) e.Handled = true; return; }
         if (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox) return; // C-7
         var action = MapKey(e.Key);
@@ -171,7 +194,7 @@ public partial class MainWindow : Window
 
     private void OnPreviewKeyUp(object sender, KeyEventArgs e)
     {
-        if (App.Hook.Armed) return;
+        if (App.Hook.Enabled) return;
         if (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox) return;
         var action = MapKey(e.Key);
         if (action is null) return;
@@ -179,13 +202,13 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void ArmToggle_Click(object sender, RoutedEventArgs e)
+    private void BackgroundHotkeysToggle_Click(object sender, RoutedEventArgs e)
     {
-        bool armed = ArmToggle.IsChecked == true;
-        App.Hook.Armed = armed;
-        if (!armed && _hornHeldByKeyboard) { _hornHeldByKeyboard = false; App.Engine.HornUp(); }
-        ArmText.Text = armed ? "🔴 ARMED · Space · 1-4 · H" : "HOTKEYS OFF — CLICK TO ARM";
-        ArmToggle.Background = armed
+        bool enabled = BackgroundHotkeysToggle.IsChecked == true;
+        App.Hook.Enabled = enabled;
+        if (!enabled && _hornHeldByKeyboard) { _hornHeldByKeyboard = false; App.Engine.HornUp(); }
+        BackgroundHotkeysText.Text = enabled ? "🟢 BACKGROUND HOTKEYS ON\nSpace · 1-4 · H" : "BACKGROUND HOTKEYS OFF\nCLICK TO ENABLE";
+        BackgroundHotkeysToggle.Background = enabled
             ? (Brush)FindResource("HornGradient")
             : (Brush)FindResource("PanelGradient");
     }

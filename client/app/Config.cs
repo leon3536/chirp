@@ -29,8 +29,11 @@ public sealed class Config
     // in the library store and wins — "stream_only" | "playback_and_stream" | "playback_only"
     [JsonPropertyName("default_speaker_mode")] public string DefaultSpeakerMode { get; set; } = "stream_only";
 
-    // C-42/C-43: AI announcer. Key at rest is DPAPI-encrypted ("dpapi:..."); a
-    // plaintext value is accepted once and re-encrypted on the next save.
+    // C-42/C-43: AI announcer. Key at rest is plaintext, so the same config.json
+    // works across every machine (booth/soundboard laptops share one file/folder).
+    // Values saved before 2026-07-25 may still carry a DPAPI "dpapi:..." prefix
+    // (machine/account-locked); those decrypt transparently where they still
+    // can, but every save from now on writes plaintext.
     [JsonPropertyName("announcer_api_key")] public string AnnouncerApiKeyStored { get; set; } = "";
     [JsonPropertyName("announcer_openai_voice")] public string AnnouncerOpenAiVoice { get; set; } = "onyx";
     [JsonPropertyName("announcer_openai_model")] public string AnnouncerOpenAiModel { get; set; } = "gpt-audio";
@@ -39,11 +42,14 @@ public sealed class Config
     [JsonPropertyName("announcer_duck_db")] public double AnnouncerDuckDb { get; set; } = -10.0;
     [JsonPropertyName("announcer_target_lufs")] public double AnnouncerTargetLufs { get; set; } = -6.0;
 
+    // C-45: open mic (live pass-through of the default recording device)
+    [JsonPropertyName("open_mic_duck_db")] public double OpenMicDuckDb { get; set; } = -10.0;
+
     public bool IsContinuous(int mode) =>
         !ModeAdvance.TryGetValue(mode.ToString(), out var v) || v != "single_shot";
 
-    // --- C-43: announcer key, DPAPI at rest --------------------------------------
-    private const string DpapiPrefix = "dpapi:";
+    // --- C-43: announcer key, plaintext at rest (portable across machines) ------
+    private const string DpapiPrefix = "dpapi:"; // legacy values only (pre-2026-07-25)
 
     [JsonIgnore]
     public string AnnouncerApiKey
@@ -55,6 +61,9 @@ public sealed class Config
             if (!stored.StartsWith(DpapiPrefix, StringComparison.Ordinal)) return stored.Trim();
             try
             {
+                // Legacy DPAPI value: only decryptable on the machine/account that
+                // saved it. Re-entering the key in the popup replaces this with
+                // plaintext, which then works on every machine.
                 return System.Text.Encoding.UTF8.GetString(
                     System.Security.Cryptography.ProtectedData.Unprotect(
                         Convert.FromBase64String(stored[DpapiPrefix.Length..]),
@@ -62,19 +71,14 @@ public sealed class Config
             }
             catch
             {
-                return ""; // key from another machine/user: behaves like "not configured"
+                return ""; // legacy key from another machine/account: behaves like "not configured"
             }
         }
     }
 
     public void SetAnnouncerApiKey(string plainKey)
     {
-        AnnouncerApiKeyStored = string.IsNullOrWhiteSpace(plainKey)
-            ? ""
-            : DpapiPrefix + Convert.ToBase64String(
-                System.Security.Cryptography.ProtectedData.Protect(
-                    System.Text.Encoding.UTF8.GetBytes(plainKey.Trim()),
-                    null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+        AnnouncerApiKeyStored = string.IsNullOrWhiteSpace(plainKey) ? "" : plainKey.Trim();
     }
 
     public SpeakerMode DefaultSpeaker => ParseSpeaker(DefaultSpeakerMode) ?? SpeakerMode.StreamOnly;

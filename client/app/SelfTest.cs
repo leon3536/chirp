@@ -30,6 +30,7 @@ public static class SelfTest
             TestWavRoundTrip(tempDir);
             TestEngine(tempDir);
             TestShuffleWeave(tempDir);
+            TestSkip(tempDir);
             TestTailFadeAndMasterVolume(tempDir);
             TestAnnouncer(tempDir);
             TestPusher();
@@ -220,6 +221,42 @@ public static class SelfTest
             $"weave keeps the no-repeat cycle intact ({upcoming.Count} of 3 unplayed left)");
     }
 
+    // --- C-44 skip: discards the next-up preview only, never touches playback -------
+
+    private static void TestSkip(string tempDir)
+    {
+        var dir = Path.Combine(tempDir, "skip");
+        Directory.CreateDirectory(dir);
+        var cfg = new Config();
+        var lib = new LibraryStore(dir);
+        var col = lib.AddCollection("skip-test", 1);
+        foreach (var name in new[] { "one", "two", "three" })
+        {
+            Normalizer.EncodeWav16(Path.Combine(lib.AudioDir, $"{name}.wav"), Sine(220, 0.3f, 3.0));
+            lib.AddClip(name, $"{name}.wav", 3.0, new[] { col.Id });
+        }
+        lib.SetOrder(1, "sequential"); // deterministic pool order (C-10)
+
+        using var engine = new AudioEngine(cfg, lib, startRenderThread: false);
+        var mix = new float[480 * 2];
+        var pcm = new byte[480 * 2 * 2];
+        void Render(int blocks) { for (int b = 0; b < blocks; b++) engine.RenderOneBlockForTest(mix, pcm); }
+
+        engine.SetMode(1);
+        engine.ToggleSpace(); // "one" starts, "two" is next up
+        Render(5);
+        var before = engine.Snapshot();
+        Check(before.NowPlayingLabel == "one" && before.NextLabel == "two",
+            "skip setup: playing 'one', 'two' next up");
+
+        engine.Skip(); // discard "two" from the queue
+        var after = engine.Snapshot();
+        Check(after.NowPlayingLabel == "one" && after.IsPlaying,
+            "skip does not touch what's currently playing");
+        Check(after.NextLabel == "three",
+            "skip advances the preview past the discarded track");
+    }
+
     // --- C-12 natural-end fade + C-41 master volume ---------------------------------
 
     private static void TestTailFadeAndMasterVolume(string tempDir)
@@ -324,11 +361,22 @@ public static class SelfTest
               && AnnouncerService.GetPersonality("energetic").Id == "energetic",
             "personality lookup defaults to deep bass");
 
-        // Key at rest is DPAPI-wrapped and round-trips (C-43)
+        // Key at rest is plaintext (portable across machines) and round-trips (C-43)
         var cfgKey = new Config();
         cfgKey.SetAnnouncerApiKey("sk-test-roundtrip-1234567890");
-        Check(cfgKey.AnnouncerApiKeyStored.StartsWith("dpapi:"), "announcer key stored encrypted");
+        Check(cfgKey.AnnouncerApiKeyStored == "sk-test-roundtrip-1234567890", "announcer key stored plaintext");
         Check(cfgKey.AnnouncerApiKey == "sk-test-roundtrip-1234567890", "announcer key round-trips");
+
+        // Legacy DPAPI-CurrentUser values (pre-2026-07-25) still decrypt on the
+        // machine/account that saved them (C-43 amendment)
+        var cfgLegacy = new Config
+        {
+            AnnouncerApiKeyStored = "dpapi:" + Convert.ToBase64String(
+                System.Security.Cryptography.ProtectedData.Protect(
+                    System.Text.Encoding.UTF8.GetBytes("sk-legacy-1234567890"),
+                    null, System.Security.Cryptography.DataProtectionScope.CurrentUser)),
+        };
+        Check(cfgLegacy.AnnouncerApiKey == "sk-legacy-1234567890", "legacy DPAPI-wrapped key still decrypts");
 
         // Speech-like (high crest factor) material must actually REACH the loud
         // target — peak-guarded normalize can't, the soft-limited path must

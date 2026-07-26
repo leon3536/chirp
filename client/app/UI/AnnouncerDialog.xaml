@@ -29,7 +29,7 @@
                 <TextBlock Text="The announcer needs an API key before it can speak."
                            FontSize="24" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
                 <TextBlock Margin="0,10,0,22" FontSize="18" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
-                           Text="Paste an OpenAI key (sk-…) or an ElevenLabs key (sk_…). The provider is detected automatically, and the key is stored encrypted on this machine — it never syncs in readable form."/>
+                           Text="Paste an OpenAI key (sk-…) or an ElevenLabs key (sk_…). The provider is detected automatically. The key is saved in config.json next to the exe (plaintext, so the same file works on every machine) — keep that folder private."/>
                 <DockPanel>
                     <Button x:Name="BtnSaveKey" DockPanel.Dock="Right" Style="{StaticResource BigButton}"
                             MinWidth="180" Margin="14,0,0,0" Click="SaveKey_Click">

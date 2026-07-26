@@ -1,15 +1,20 @@
-// rgas-source global hotkeys — SPEC C-6, C-7, C-9.
+// rgas-source background hotkeys — SPEC C-6, C-7, C-9, C-45.
 //
-// A WH_KEYBOARD_LL low-level keyboard hook. While Armed, Space / 1-4 / H are
-// intercepted system-wide — even with the app unfocused or minimized — and
-// CONSUMED (return 1) so the focused app never sees them (C-6). While a text
-// input inside this app has focus, SuppressCheck returns true and keys pass
-// through untouched (C-7). Disarmed, the hook passes everything through; the
-// window's normal PreviewKeyDown/Up handles focused-mode keys instead.
+// A WH_KEYBOARD_LL low-level keyboard hook. While Enabled, Space / 1-4 / H are
+// observed system-wide — even with the app unfocused or minimized — but this
+// is a PASSIVE subscription: every event is always passed on to
+// CallNextHookEx, so the focused app (e.g. a scorekeeping program that also
+// binds Space) still receives every key exactly as if the hook weren't
+// installed (C-6). While a text input inside this app has focus, SuppressCheck
+// returns true and the hook does not fire its own action either (C-7).
+// Disabled, the hook still passes everything through untouched and fires no
+// actions; the window's normal PreviewKeyDown/Up handles focused-mode keys
+// instead.
 //
-// Key-ups are consumed too, and OS auto-repeat is filtered (a held Space must
-// not toggle playback repeatedly). H reports both edges — the horn is
-// hold-to-sound (C-9).
+// OS auto-repeat is filtered so a held Space doesn't toggle playback
+// repeatedly. H reports both edges — the horn is hold-to-sound (C-9).
+// O is only a hotkey (open mic, C-45) with Ctrl held at the moment of the
+// key-down; otherwise it's an ordinary keystroke.
 //
 // Install on the UI thread (the hook callback needs its message pump).
 using System.Diagnostics;
@@ -17,7 +22,7 @@ using System.Runtime.InteropServices;
 
 namespace RgasSoundboard.Hotkeys;
 
-public enum HotkeyAction { Space, Mode1, Mode2, Mode3, Mode4, Horn, Announce }
+public enum HotkeyAction { Space, Mode1, Mode2, Mode3, Mode4, Horn, Announce, Skip, OpenMic }
 
 public sealed class GlobalKeyboardHook : IDisposable
 {
@@ -30,12 +35,12 @@ public sealed class GlobalKeyboardHook : IDisposable
     private readonly LowLevelKeyboardProc _proc; // kept alive: GC of this delegate kills the hook
     private readonly HashSet<int> _down = new(); // auto-repeat filter
     private IntPtr _hook = IntPtr.Zero;
-    private bool _armed;
+    private bool _enabled;
 
-    public bool Armed
+    public bool Enabled
     {
-        get => _armed;
-        set { _armed = value; if (!value) _down.Clear(); }
+        get => _enabled;
+        set { _enabled = value; if (!value) _down.Clear(); }
     }
 
     /// <summary>C-7: return true to let keys through (text input focused in-app).</summary>
@@ -63,12 +68,19 @@ public sealed class GlobalKeyboardHook : IDisposable
         0x34 or 0x64 => HotkeyAction.Mode4,
         0x48 => HotkeyAction.Horn, // H
         0x41 => HotkeyAction.Announce, // A (C-42)
+        0x4B => HotkeyAction.Skip, // K (C-44)
+        0x4F => HotkeyAction.OpenMic, // O — only a hotkey with Ctrl held, gated below (C-45)
         _ => null,
     };
 
+    private const int VK_CONTROL = 0x11;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
     private IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && _armed && !(SuppressCheck?.Invoke() ?? false))
+        if (nCode >= 0 && _enabled && !(SuppressCheck?.Invoke() ?? false))
         {
             int msg = (int)wParam;
             bool isDown = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
@@ -77,6 +89,10 @@ public sealed class GlobalKeyboardHook : IDisposable
             {
                 int vk = Marshal.ReadInt32(lParam); // first field of KBDLLHOOKSTRUCT
                 var action = Map(vk);
+                // O is only a hotkey while Ctrl is held — otherwise it's an
+                // ordinary keystroke (typing "o" elsewhere must never toggle the mic).
+                if (action == HotkeyAction.OpenMic && (GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0)
+                    action = null;
                 if (action is not null)
                 {
                     if (isDown)
@@ -89,10 +105,11 @@ public sealed class GlobalKeyboardHook : IDisposable
                         _down.Remove(vk);
                         Hotkey?.Invoke(action.Value, false);
                     }
-                    return 1; // consume (C-6): the focused app never sees the key
                 }
             }
         }
+        // Always pass through (C-6): this is a passive subscription, never a
+        // capture — the focused app receives every key exactly as normal.
         return CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 

@@ -53,6 +53,8 @@ public partial class SoundboardView : UserControl
 
     private void Play_Click(object sender, RoutedEventArgs e) => _engine.ToggleSpace();
 
+    private void Skip_Click(object sender, RoutedEventArgs e) => _engine.Skip();
+
     private void Order_Click(object sender, RoutedEventArgs e)
     {
         var s = _engine.Snapshot();
@@ -63,6 +65,8 @@ public partial class SoundboardView : UserControl
 
     private void Announce_Click(object sender, RoutedEventArgs e) =>
         (Window.GetWindow(this) as MainWindow)?.OpenAnnouncer(); // C-42
+
+    private void OpenMic_Click(object sender, RoutedEventArgs e) => _engine.ToggleMic(); // C-45
 
     private void Horn_Down(object sender, MouseButtonEventArgs e) { _engine.HornDown(); BtnHorn.CaptureMouse(); }
     private void Horn_Up(object sender, RoutedEventArgs e) { _engine.HornUp(); BtnHorn.ReleaseMouseCapture(); }
@@ -172,6 +176,13 @@ public partial class SoundboardView : UserControl
         Progress.Value = s.IsPlaying && s.DurationSeconds > 0
             ? 1 - s.RemainingSeconds / s.DurationSeconds
             : 0;
+        NextUpText.Text = string.IsNullOrEmpty(s.NextLabel) ? "" : $"NEXT: {s.NextLabel}";
+        BtnSkip.IsEnabled = !string.IsNullOrEmpty(s.NextLabel);
+
+        OpenMicText.Text = s.MicOpen ? "🔴 MIC LIVE" : "🎤 OPEN MIC";
+        BtnOpenMic.Background = s.MicOpen
+            ? (Brush)FindResource("HornGradient")
+            : (Brush)FindResource("PanelGradient");
 
         foreach (var row in _clipRows) // C-37 playlist toggles
             row.IsPlaying = s.IsPlaying && row.Id == s.NowPlayingClipId;
