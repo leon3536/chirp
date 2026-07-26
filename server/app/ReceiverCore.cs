@@ -1,6 +1,7 @@
 // rgas-booth receiver core — SPEC S-2 (listen), S-3 (new connection replaces
-// old), S-17 (connection history). Owns the listener, buffer, player, and
-// status endpoint; the window (S-16) is just a viewer over this.
+// old), S-3a (kick marker for the replaced client), S-17 (connection
+// history). Owns the listener, buffer, player, and status endpoint; the
+// window (S-16) is just a viewer over this.
 // Wire contract (client SPEC C-29): raw PCM s16le 48 kHz stereo on TCP :4953.
 using System.Diagnostics;
 using System.Net;
@@ -13,6 +14,13 @@ public sealed record ConnEvent(DateTime At, string Kind, string Address);
 public sealed class ReceiverCore : IDisposable
 {
     private const int HistoryCap = 100;
+
+    /// <summary>S-3a wire contract: sent to a replaced source right before its
+    /// socket is closed, so it can tell "another client took over" apart from a
+    /// plain network blip and stop auto-retrying (client SPEC C-31a). The PCM
+    /// wire never carries anything server->client otherwise, so any bytes at
+    /// all would do — this literal just makes intent obvious in a capture.</summary>
+    internal static readonly byte[] KickMarker = "RGAS-KICKED\n"u8.ToArray();
 
     private readonly object _gate = new();
     private readonly List<ConnEvent> _history = new(); // S-17a, newest first
@@ -119,6 +127,18 @@ public sealed class ReceiverCore : IDisposable
                 {
                     Log.Info($"new source {remote} replaces {SourceAddress} (S-3)");
                     AddEvent("replaced", SourceAddress);
+                    // S-3a: tell the outgoing client it was deliberately replaced
+                    // (not a blip) so it stops retrying instead of ping-ponging
+                    // with the client that just took over. Best-effort: a stuck
+                    // peer must never hold up accepting the new source.
+                    try
+                    {
+                        _current.SendTimeout = 500;
+                        var oldStream = _current.GetStream();
+                        oldStream.Write(KickMarker, 0, KickMarker.Length);
+                        oldStream.Flush();
+                    }
+                    catch { }
                     try { _current.Close(); } catch { }
                 }
                 _current = client;

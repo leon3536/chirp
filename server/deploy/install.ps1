@@ -39,6 +39,58 @@ if (-not (Test-Path $ExePath)) {
     exit 1
 }
 
+# Bug fix 2026-07-25: a single unexpected registry error inside a cosmetic
+# hygiene step (sound scheme, mono output, DND, etc.) used to abort the WHOLE
+# rest of the script under $ErrorActionPreference = Stop -- silently skipping
+# the CPU lock, active hours, static IP, startup shortcut, and auto-login that
+# come after it. None of these steps are load-bearing for the receiver itself
+# (S-18 spirit: a non-critical subsystem must never take down the appliance),
+# so each one now runs isolated: a failure is logged and the script moves on.
+function Invoke-Hygiene([string]$Label, [scriptblock]$Action) {
+    try { & $Action }
+    catch { Write-Host "[hygiene] SKIPPED ($Label): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
+# Bug fix 2026-07-25 (root cause): every registry write in this script used to
+# go through PowerShell's registry provider (New-Item -Force + Set-ItemProperty).
+# That provider has a known-flaky delete-then-recreate path when -Force targets
+# a key that already exists with real subkeys under it (PushNotifications and
+# several other Windows-managed keys touched below all qualify) -- it can throw
+# "Cannot delete a subkey tree because the subkey does not exist" even though
+# nothing is actually broken. reg.exe's own `add` verb creates the full key
+# path AND sets the value in one atomic, decades-tested operation, and never
+# touches sibling/child subkeys, so every write below goes through it instead.
+# Stress-tested against: missing path, already-existing path, DWORD, REG_SZ,
+# default/unnamed value (including an EMPTY default -- PowerShell silently
+# drops an empty-string argument passed to a native exe, so /d is omitted
+# entirely rather than passed as ""), a value name containing a hyphen, a key
+# path containing a space ("Windows NT"), a parent key that already has a real
+# child subkey (the exact shape of the failure this replaces), and the
+# provider-qualified PSPath format Get-ChildItem returns (used by the sound-
+# scheme loop below, which is NOT the same string shape as "HKCU:\...").
+function ConvertTo-RegExePath([string]$Path) {
+    $p = $Path -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
+    $p = $p -replace '^HKEY_CURRENT_USER\\', 'HKCU\'
+    $p = $p -replace '^HKEY_LOCAL_MACHINE\\', 'HKLM\'
+    $p = $p -replace '^HKCU:\\', 'HKCU\'
+    $p = $p -replace '^HKLM:\\', 'HKLM\'
+    return $p
+}
+function Set-Reg([string]$Path, [string]$Name, [string]$Value, [string]$RegType = "REG_DWORD") {
+    $regPath = ConvertTo-RegExePath $Path
+    $regArgs = @("add", $regPath, "/v", $Name, "/t", $RegType, "/f")
+    if ($Value -ne "") { $regArgs += @("/d", $Value) }
+    $out = & reg.exe @regArgs 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "reg add '$regPath' /v $Name failed: $out" }
+}
+function Set-RegDefault([string]$Path, [string]$Value) {
+    $regPath = ConvertTo-RegExePath $Path
+    $regArgs = @("add", $regPath, "/ve", "/f")
+    if ($Value -ne "") { $regArgs += @("/d", $Value) }
+    $out = & reg.exe @regArgs 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "reg add '$regPath' (default) failed: $out" }
+}
+
 # --- config next to the exe (S-8) ---
 $exeDir = Split-Path $ExePath -Parent
 if (-not (Test-Path "$exeDir\config.json")) {
@@ -50,6 +102,25 @@ if (-not (Test-Path "$exeDir\config.json")) {
 $cfg = Get-Content "$exeDir\config.json" -Raw | ConvertFrom-Json
 $pcmPort = [int]$cfg.listen_port
 $statusPort = [int]$cfg.status_port
+
+# --- output level pinned to 100 (owner request 2026-07-25) ---
+# The booth's WASAPI endpoint volume is fixed at 100; loudness is controlled
+# downstream at the mixer, never at the Windows endpoint. S-6b re-asserts this
+# (and un-mutes) on every device claim, so an accidental nudge/mute self-heals
+# on the next boot or device switch -- this just guarantees the config value
+# itself is 100 even on a re-install over an older config.json.
+Invoke-Hygiene "output level -> 100" {
+    if ($cfg.output_volume_percent -ne 100) {
+        Write-Host "[audio] output_volume_percent -> 100 (was $($cfg.output_volume_percent); control loudness at the mixer)"
+        # Add-Member (not direct assignment): an older config.json predating S-6b
+        # may not have this key at all, and PSCustomObject rejects assigning a
+        # property that doesn't already exist.
+        $cfg | Add-Member -NotePropertyName output_volume_percent -NotePropertyValue 100 -Force
+        $cfg | ConvertTo-Json -Depth 5 | Set-Content -Path "$exeDir\config.json"
+    } else {
+        Write-Host "[audio] output_volume_percent already 100"
+    }
+}
 
 # --- firewall (S-11): rinkside PCM + status endpoint ---
 # First delete any auto-created per-exe rules named "RgasReceiver". Windows
@@ -106,82 +177,111 @@ foreach ($adapter in Get-NetAdapter -Physical | Where-Object { $_.PhysLayer -lik
 }
 
 # --- PA hygiene (S-11): the booth output feeds the rink PA ---
+# Each step below is isolated by Invoke-Hygiene (bug fix 2026-07-25): a
+# failure in any ONE of these cosmetic settings -- including one that hasn't
+# bitten us yet, e.g. a registry quirk on a Windows build we haven't tested --
+# is logged and skipped rather than aborting the CPU lock / active hours /
+# static IP / startup shortcut / auto-login that come after it.
+
 # 1. Sound scheme "No Sounds": a Windows notification ding must never play in
 #    the arena. Applies to the CURRENT user (run install.ps1 as the booth
 #    account, which is also the auto-login account).
-Write-Host "[audio] setting sound scheme to 'No Sounds' (no dings on the PA)"
-Set-ItemProperty -Path "HKCU:\AppEvents\Schemes" -Name "(Default)" -Value ".None"
-foreach ($event in Get-ChildItem "HKCU:\AppEvents\Schemes\Apps\*\*" -ErrorAction SilentlyContinue) {
-    $current = Join-Path $event.PSPath ".Current"
-    if (Test-Path $current) {
-        try { Set-ItemProperty -Path $current -Name "(Default)" -Value "" -ErrorAction Stop } catch {}
+Invoke-Hygiene "sound scheme -> No Sounds" {
+    Write-Host "[audio] setting sound scheme to 'No Sounds' (no dings on the PA)"
+    Set-RegDefault "HKCU:\AppEvents\Schemes" ".None"
+    foreach ($event in Get-ChildItem "HKCU:\AppEvents\Schemes\Apps\*\*" -ErrorAction SilentlyContinue) {
+        $current = Join-Path $event.PSPath ".Current"
+        if (Test-Path $current) {
+            try { Set-RegDefault $current "" } catch {}
+        }
     }
 }
 
 # 2. Communications ducking off: Windows must never attenuate the PA feed
 #    because something registered as a "call". 3 = do nothing.
-Write-Host "[audio] communications ducking -> do nothing"
-New-Item -Path "HKCU:\Software\Microsoft\Multimedia\Audio" -Force | Out-Null
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Multimedia\Audio" -Name "UserDuckingPreference" -Value 3 -Type DWord
+Invoke-Hygiene "communications ducking" {
+    Write-Host "[audio] communications ducking -> do nothing"
+    Set-Reg "HKCU:\Software\Microsoft\Multimedia\Audio" "UserDuckingPreference" "3"
+}
 
 # 3. Startup boot chime off (the "No Sounds" scheme doesn't always cover it).
-Write-Host "[audio] startup boot chime -> off"
-$boot = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation"
-New-Item -Path $boot -Force | Out-Null
-Set-ItemProperty -Path $boot -Name "DisableStartupSound" -Value 1 -Type DWord
+Invoke-Hygiene "startup boot chime" {
+    Write-Host "[audio] startup boot chime -> off"
+    Set-Reg "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation" "DisableStartupSound" "1"
+}
 
 # 4. Mono output (item 5): sum L+R so a single mixer channel / one speaker gets
 #    everything. Ease-of-Access "Mono audio" toggle.
-Write-Host "[audio] mono output -> on"
-New-Item -Path "HKCU:\Software\Microsoft\Multimedia\Audio" -Force | Out-Null
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Multimedia\Audio" -Name "AccessibilityMonoMixState" -Value 1 -Type DWord
+Invoke-Hygiene "mono output" {
+    Write-Host "[audio] mono output -> on"
+    Set-Reg "HKCU:\Software\Microsoft\Multimedia\Audio" "AccessibilityMonoMixState" "1"
+}
 
 # --- turn off "Complete Windows setup" nags (item 3) ---
 # The checkboxes under Settings > Notifications > Additional settings. These
 # post-update "finish setting up your device / welcome experience" screens can
 # pop over the dashboard and steal focus on a booth that nobody attends.
-Write-Host "[experience] disabling welcome-experience / finish-setup / tips nags"
-$cdm = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
-New-Item -Path $cdm -Force | Out-Null
-Set-ItemProperty -Path $cdm -Name "SubscribedContent-310093Enabled" -Value 0 -Type DWord  # welcome experience after updates
-Set-ItemProperty -Path $cdm -Name "SubscribedContent-338389Enabled" -Value 0 -Type DWord  # tips and suggestions
-$scoobe = "HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement"
-New-Item -Path $scoobe -Force | Out-Null
-Set-ItemProperty -Path $scoobe -Name "ScoobeSystemSettingEnabled" -Value 0 -Type DWord    # suggest ways to finish setup
+Invoke-Hygiene "Windows setup nags" {
+    Write-Host "[experience] disabling welcome-experience / finish-setup / tips nags"
+    $cdm = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+    Set-Reg $cdm "SubscribedContent-310093Enabled" "0"  # welcome experience after updates
+    Set-Reg $cdm "SubscribedContent-338389Enabled" "0"  # tips and suggestions
+    Set-Reg "HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement" "ScoobeSystemSettingEnabled" "0"  # suggest ways to finish setup
+}
+
+# --- Do Not Disturb: no toast banner may ever pop over the dashboard or steal
+# focus (owner request 2026-07-25) ---
+# Focus Assist's own on/off state lives in an undocumented binary blob
+# (CloudStore\...\windows.data.notifications.quiethoursprofile) that isn't
+# reliably scriptable and can shift between Windows builds. The documented,
+# robust equivalent -- and the thing that actually matters here -- is turning
+# toast notifications off entirely: per-user master toggle plus the
+# corresponding policy, so nothing (Windows Update, low battery, Bluetooth
+# pairing, mail, etc.) can ever appear on screen or make a sound.
+Invoke-Hygiene "Do Not Disturb (toast notifications)" {
+    Write-Host "[notifications] toast notifications -> off (DND)"
+    Set-Reg "HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications" "ToastEnabled" "0"
+    Set-Reg "HKCU:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" "NoToastApplicationNotification" "1"
+}
 
 # --- responsiveness: lock the CPU clock (item 7) ---
 # Min = Max = 100% keeps the processor at full base clock, no down-throttling,
 # which minimizes DPC latency / audio micro-stutters. Applied to the active
 # scheme on AC (the booth runs on wall power).
-Write-Host "[perf] processor power state min=100 max=100 (AC)"
-powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 100
-powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX 100
-powercfg /setactive SCHEME_CURRENT
+Invoke-Hygiene "CPU power lock" {
+    Write-Host "[perf] processor power state min=100 max=100 (AC)"
+    powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 100
+    powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX 100
+    powercfg /setactive SCHEME_CURRENT
+}
 
 # --- Windows Update: never restart mid-game (item 8) ---
-# Two layers: (a) active hours, but Windows caps the window at 18 h so a literal
-# 5am-midnight (19 h) is rejected -- we set 5:00-23:00, the max; (b) the real
-# guarantee: never auto-reboot while a user is logged on (auto-login => always
-# logged on), so an update waits for a manual reboot instead of a forced one.
-Write-Host "[update] active hours 05:00-23:00 + no auto-reboot while logged on"
-$uxSettings = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
-New-Item -Path $uxSettings -Force | Out-Null
-Set-ItemProperty -Path $uxSettings -Name "SmartActiveHoursState" -Value 0 -Type DWord  # 0 = manual, honor the values below
-Set-ItemProperty -Path $uxSettings -Name "ActiveHoursStart" -Value 5  -Type DWord
-Set-ItemProperty -Path $uxSettings -Name "ActiveHoursEnd"   -Value 23 -Type DWord
-$auPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
-New-Item -Path $auPolicy -Force | Out-Null
-Set-ItemProperty -Path $auPolicy -Name "NoAutoRebootWithLoggedOnUsers" -Value 1 -Type DWord
+# Two layers: (a) active hours -- the window the booth is actually in use, so
+# Windows avoids restarting inside it; owner request 2026-07-25 sets this to
+# 23:00-05:00 (overnight games), which Windows supports as a wraparound span
+# (End < Start); (b) the real guarantee regardless of the active-hours window:
+# never auto-reboot while a user is logged on (auto-login => always logged
+# on), so an update waits for a manual reboot instead of a forced one.
+Invoke-Hygiene "Windows Update active hours + no forced reboot" {
+    Write-Host "[update] active hours 23:00-05:00 + no auto-reboot while logged on"
+    $uxSettings = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
+    Set-Reg $uxSettings "SmartActiveHoursState" "0"  # 0 = manual, honor the values below
+    Set-Reg $uxSettings "ActiveHoursStart" "23"
+    Set-Reg $uxSettings "ActiveHoursEnd" "5"
+    Set-Reg "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" "NoAutoRebootWithLoggedOnUsers" "1"
+}
 
 # --- optional static IP (S-14) ---
 if ($StaticIp) {
-    Write-Host "[net] pinning static IP $StaticIp/$PrefixLength on '$InterfaceAlias'"
-    Get-NetIPAddress -InterfaceAlias $InterfaceAlias -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.PrefixOrigin -eq "Manual" } |
-        Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
-    New-NetIPAddress -InterfaceAlias $InterfaceAlias -IPAddress $StaticIp -PrefixLength $PrefixLength `
-        -DefaultGateway $Gateway | Out-Null
-    Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses $Gateway
+    Invoke-Hygiene "static IP" {
+        Write-Host "[net] pinning static IP $StaticIp/$PrefixLength on '$InterfaceAlias'"
+        Get-NetIPAddress -InterfaceAlias $InterfaceAlias -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.PrefixOrigin -eq "Manual" } |
+            Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+        New-NetIPAddress -InterfaceAlias $InterfaceAlias -IPAddress $StaticIp -PrefixLength $PrefixLength `
+            -DefaultGateway $Gateway | Out-Null
+        Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses $Gateway
+    }
 } else {
     Write-Host "[net] DHCP mode; configure a DHCP reservation for this machine (S-14)"
 }
@@ -229,16 +329,15 @@ if (-not (Get-Process RgasReceiver -ErrorAction SilentlyContinue)) {
 #    actually performs the sign-in at boot.
 $winlogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 $plPath   = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device"
-New-Item -Path $plPath -Force | Out-Null
-Set-ItemProperty -Path $plPath -Name "DevicePasswordLessBuildVersion" -Value 0 -Type DWord
+Set-Reg $plPath "DevicePasswordLessBuildVersion" "0"
 
 if ($AutoLogonUser -and $AutoLogonPassword) {
     # Domain for a LOCAL account is the machine name; a real domain would differ.
     $domain = $env:COMPUTERNAME
-    Set-ItemProperty -Path $winlogon -Name "AutoAdminLogon"    -Value "1"             -Type String
-    Set-ItemProperty -Path $winlogon -Name "DefaultUserName"   -Value $AutoLogonUser  -Type String
-    Set-ItemProperty -Path $winlogon -Name "DefaultDomainName" -Value $domain         -Type String
-    Set-ItemProperty -Path $winlogon -Name "DefaultPassword"   -Value $AutoLogonPassword -Type String
+    Set-Reg $winlogon "AutoAdminLogon"    "1"                 "REG_SZ"
+    Set-Reg $winlogon "DefaultUserName"   $AutoLogonUser      "REG_SZ"
+    Set-Reg $winlogon "DefaultDomainName" $domain             "REG_SZ"
+    Set-Reg $winlogon "DefaultPassword"   $AutoLogonPassword  "REG_SZ"
     # A leftover count can make auto-login fire only N times, then stop.
     Remove-ItemProperty -Path $winlogon -Name "AutoLogonCount" -ErrorAction SilentlyContinue
     Write-Host "[login] auto-login configured for '$domain\$AutoLogonUser' (S-13)" -ForegroundColor Green

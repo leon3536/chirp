@@ -15,6 +15,12 @@ remove it completely.
 ## Build (dev machine — the only place the .NET SDK is needed)
 
 ```powershell
+.\publish.ps1
+```
+
+or by hand:
+
+```powershell
 # from server\
 dotnet publish app -c Release -r win-x64 -o publish
 ```
