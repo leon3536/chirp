@@ -120,22 +120,28 @@ public sealed class AnnouncerService
             throw new InvalidOperationException("No announcer API key configured.");
 
         bool openAi = key.StartsWith("sk-", StringComparison.Ordinal); // ElevenLabs keys are sk_
-        byte[] audio;
+        byte[] audio = Array.Empty<byte>();
         string ext;
         if (openAi && dramatic)
         {
             // Dramatic: the omni PERFORMANCE model, with the verbatim guard — check
-            // the returned transcript against the script; off-script is retried
-            // once, then refused. Improv never airs.
+            // each take's transcript against the script and keep the first that
+            // lands on-script. Loop a few times before giving up (improv never
+            // airs), then fall back to the verbatim TTS endpoint (which cannot
+            // ad-lib) delivered excitedly — so the operator always gets a clean,
+            // on-script take rather than an "off-script twice" error.
             ext = "wav";
-            string? transcript;
-            (audio, transcript) = await OpenAiOmniAsync(key, text, personality, ct);
-            if (!OnScript(script, transcript))
+            const int maxAttempts = 4;
+            bool aired = false;
+            for (int attempt = 0; attempt < maxAttempts && !ct.IsCancellationRequested; attempt++)
             {
-                (audio, transcript) = await OpenAiOmniAsync(key, text, personality, ct);
-                if (!OnScript(script, transcript))
-                    throw new InvalidOperationException(
-                        $"The performance went off-script twice (said: “{Truncate(transcript ?? "?", 90)}”). Try again.");
+                var (take, transcript) = await OpenAiOmniAsync(key, text, personality, ct);
+                if (OnScript(script, transcript)) { audio = take; aired = true; break; }
+            }
+            if (!aired)
+            {
+                ext = "mp3";
+                audio = await OpenAiTtsAsync(key, script, directions, personality, ct, excited: true);
             }
         }
         else if (openAi)
@@ -234,17 +240,25 @@ public sealed class AnnouncerService
     /// <summary>Plain path: /v1/audio/speech reads the input verbatim — no script
     /// guard needed. Persona + any (directions) ride in the instructions field.</summary>
     private async Task<byte[]> OpenAiTtsAsync(string key, string script, string? directions,
-        Personality personality, CancellationToken ct)
+        Personality personality, CancellationToken ct, bool excited = false)
     {
         var body = new Dictionary<string, object?>
         {
             ["model"] = "gpt-4o-mini-tts",
             ["voice"] = personality.OpenAiVoice,
             ["input"] = script, // parens stripped: a TTS engine would read them aloud
-            ["instructions"] = $"You are {personality.Persona}, making a routine " +
-                               "public-address announcement at a community ice rink. " +
-                               "Calm, clear, unhurried delivery." +
-                               (directions is null ? "" : $" Voice direction: {directions}."),
+            // This endpoint reads the input verbatim — it cannot add words — so it
+            // doubles as the always-on-script fallback when the omni performance
+            // keeps improvising. `excited` gives that fallback game-moment energy.
+            ["instructions"] = excited
+                ? $"You are {personality.Persona}. It is the exact moment of a game-winning " +
+                  "goal — deliver this with big, thrilling, celebratory arena energy. " +
+                  $"Excited delivery: {personality.ExcitedStyle}." +
+                  (directions is null ? "" : $" Voice direction: {directions}.")
+                : $"You are {personality.Persona}, making a routine " +
+                  "public-address announcement at a community ice rink. " +
+                  "Calm, clear, unhurried delivery." +
+                  (directions is null ? "" : $" Voice direction: {directions}."),
             ["response_format"] = "mp3",
         };
         using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech")
