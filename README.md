@@ -30,6 +30,7 @@ the booth; the operator sits at the bench, too far for Bluetooth to hold.
 - ⚡ **Under 300 ms, button to PA** — the goal horn feels *instant*, not "eventually."
 - 🎛️ **Zero-training operator surface** — four modes and a spacebar, the muscle memory of a play clock. No mixer, no settings.
 - 🔊 **Consistent, loud, clean** — every clip loudness-normalized so nothing is quiet, hot, or opens on a bad intro.
+- 📣 **More than music** — two switchable goal horns, a built-in AI announcer, and a push-to-talk mic all ride over a ducked bed, so goals, penalties, and PA calls come from one surface.
 - 🩹 **Unattended and self-healing** — the booth boots straight to working audio after a power cut; a WiFi blip reconnects in ~1 second, untouched.
 - 💻 **Any laptop, no install** — copy a folder, double-click. No drivers, no runtime, no internet.
 
@@ -67,14 +68,27 @@ The zero-training surface the volunteer actually touches. It runs on any Windows
 2. **Spacebar plays and stops** — it starts the next track from the mode's pool
    and fades out on the next press. Same rhythm as running a play clock.
 3. **Hold `H` for the goal horn** — a hot-mastered horn fires instantly over the
-   music, ducking it, and finishes clean when you let go.
+   music, ducking it, and finishes clean when you let go. Two horns are built in
+   (**Devil** and **Star**); `Ctrl+H` switches which one `H` fires.
 4. **Background hotkeys** (one button) so `Space` / `1`–`4` / `H` work even while
    you're clicking around the scorekeeping app — a passive subscription, so the
    scorekeeping app still gets every key too.
 
-Everything else — collections, shuffle vs. in-order, the connection light, master
-volume, and the STOP button — is one glance away and impossible to break. Worst
-case is the wrong song; the next spacebar fixes it.
+### More at your fingertips
+
+- **Next-up preview + `K` to skip** — the board always shows the track queued next
+  in the pool; skip discards just that upcoming pick, never what's playing now.
+- 📣 **AI announcer** (`A`) — type a line ("GOOOAL! Blue Devils win!") and a voice
+  model *performs* it over a ducked music bed, in your pick of three announcer
+  personalities. It's the one online feature; everything else runs internet-down.
+- 🎤 **Open mic** (`Ctrl+O`) — live push-to-talk pass-through of the laptop's mic,
+  ducked over the music, for a quick word to the rink.
+- **Master volume, output-device pick, shuffle vs. in-order, a live spectrum
+  analyzer, and an always-visible booth-connection light** — one glance away, and
+  none of it can break audio.
+
+Worst case is the wrong song; the next spacebar fixes it. There are no settings to
+get lost in.
 
 ### Build clips right at the rink — no offline pipeline
 
