@@ -96,15 +96,15 @@
                     </StackPanel>
                 </Button>
 
-                <!-- C-9: hold-to-sound, mouse and touch -->
+                <!-- C-9/C-46: hold-to-sound; button shows the active horn (Ctrl+H switches) -->
                 <Button x:Name="BtnHorn" Style="{StaticResource BigButton}"
                         Background="{StaticResource HornGradient}" BorderBrush="#66F0424C"
                         PreviewMouseLeftButtonDown="Horn_Down" PreviewMouseLeftButtonUp="Horn_Up"
                         MouseLeave="Horn_Up" LostMouseCapture="Horn_Up"
                         TouchDown="Horn_TouchDown" TouchUp="Horn_TouchUp" LostTouchCapture="Horn_TouchUp">
                     <StackPanel>
-                        <TextBlock Text="📢 HORN" FontSize="26" HorizontalAlignment="Center"/>
-                        <TextBlock Text="HOLD — or hold H" FontSize="14" Opacity="0.7" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="HornNameText" Text="📢 STAR HORN" FontSize="26" HorizontalAlignment="Center"/>
+                        <TextBlock Text="hold · or H · Ctrl+H switches" FontSize="13" Opacity="0.7" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Button>
             </UniformGrid>

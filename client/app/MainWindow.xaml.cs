@@ -48,6 +48,9 @@ public partial class MainWindow : Window
         App.Engine.Speaker = Config.ParseSpeaker(App.Lib.GetSpeakerMode()) ?? App.Cfg.DefaultSpeaker;
         UpdateSpeakerButton();
 
+        // C-46: restore the persisted active horn (config default on first run)
+        App.Engine.SetActiveHorn(App.Lib.GetActiveHorn() ?? App.Cfg.DefaultHorn);
+
         // C-41: restore the persisted master volume (slider drives the engine)
         _volumeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
         _volumeSaveTimer.Tick += (_, _) =>
@@ -130,6 +133,9 @@ public partial class MainWindow : Window
                 _hornHeldByKeyboard = isDown;
                 if (isDown) App.Engine.HornDown(); else App.Engine.HornUp();
                 break;
+            case HotkeyAction.HornToggle when isDown:
+                App.Lib.SetActiveHorn(App.Engine.ToggleHorn()); // C-46: Ctrl+H, persisted
+                break;
             case HotkeyAction.Announce when isDown:
                 // Never block inside the low-level hook callback (Windows would
                 // silently drop the hook) — open the modal on the next dispatch.
@@ -188,6 +194,9 @@ public partial class MainWindow : Window
         if (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox) return; // C-7
         var action = MapKey(e.Key);
         if (action is null) return;
+        // C-46: Ctrl+H toggles the active horn (focused mode); plain H is the hold.
+        if (action == HotkeyAction.Horn && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            action = HotkeyAction.HornToggle;
         OnHotkey(action.Value, true); // Horn case records _hornHeldByKeyboard
         e.Handled = true;
     }

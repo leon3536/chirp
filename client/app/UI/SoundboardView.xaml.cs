@@ -169,6 +169,8 @@ public partial class SoundboardView : UserControl
             UpdateOrderText(s.Mode);
         }
 
+        HornNameText.Text = s.ActiveHorn == "devil" ? "📢 DEVIL HORN" : "📢 STAR HORN"; // C-46
+
         PlayText.Text = s.IsPlaying ? "◼  STOP" : "▶  PLAY";
         BtnPlay.IsEnabled = s.Mode != 4;
         NowLabel.Text = s.IsPlaying ? s.NowPlayingLabel : (s.Mode == 4 ? "— silence —" : "—");

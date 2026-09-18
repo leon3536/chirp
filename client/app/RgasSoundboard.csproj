@@ -29,10 +29,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- C-20: the three-part horn ships inside the executable (embedded). -->
-    <EmbeddedResource Include="assets\horn_attack.wav" />
-    <EmbeddedResource Include="assets\horn_loop.wav" />
-    <EmbeddedResource Include="assets\horn_tail.wav" />
+    <!-- C-20/C-46: two three-part horns ship inside the executable (embedded).
+         Devil = synth horn; Star = the longer recovered production horn. -->
+    <EmbeddedResource Include="assets\devil_horn_attack.wav" />
+    <EmbeddedResource Include="assets\devil_horn_loop.wav" />
+    <EmbeddedResource Include="assets\devil_horn_tail.wav" />
+    <EmbeddedResource Include="assets\star_horn_attack.wav" />
+    <EmbeddedResource Include="assets\star_horn_loop.wav" />
+    <EmbeddedResource Include="assets\star_horn_tail.wav" />
   </ItemGroup>
 
 </Project>

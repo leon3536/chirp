@@ -9,6 +9,7 @@
   "horn_target_lufs": -11.0,
   "mode_advance": { "1": "continuous", "2": "single_shot", "3": "continuous" },
   "default_speaker_mode": "stream_only",
+  "default_horn": "star",
   "announcer_api_key": "",
   "announcer_openai_voice": "onyx",
   "announcer_openai_model": "gpt-audio",

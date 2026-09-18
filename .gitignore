@@ -18,6 +18,9 @@ client/library/
 *.ogg
 *.wav
 *.flac
-!client/app/assets/horn_attack.wav
-!client/app/assets/horn_loop.wav
-!client/app/assets/horn_tail.wav
+!client/app/assets/devil_horn_attack.wav
+!client/app/assets/devil_horn_loop.wav
+!client/app/assets/devil_horn_tail.wav
+!client/app/assets/star_horn_attack.wav
+!client/app/assets/star_horn_loop.wav
+!client/app/assets/star_horn_tail.wav

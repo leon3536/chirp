@@ -29,6 +29,10 @@ public sealed class Config
     // in the library store and wins — "stream_only" | "playback_and_stream" | "playback_only"
     [JsonPropertyName("default_speaker_mode")] public string DefaultSpeakerMode { get; set; } = "stream_only";
 
+    // C-46: fresh-install default active horn — "devil" | "star". The operator's
+    // last Ctrl+H choice is persisted in the library store and wins.
+    [JsonPropertyName("default_horn")] public string DefaultHorn { get; set; } = "star";
+
     // C-42/C-43: AI announcer. Key at rest is plaintext, so the same config.json
     // works across every machine (booth/soundboard laptops share one file/folder).
     // Values saved before 2026-07-25 may still carry a DPAPI "dpapi:..." prefix

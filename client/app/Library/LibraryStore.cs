@@ -41,6 +41,8 @@ public sealed class LibraryData
     [JsonPropertyName("master_volume")] public double? MasterVolume { get; set; }
     // C-42: last chosen announcer personality id (null: default)
     [JsonPropertyName("announcer_personality")] public string? AnnouncerPersonality { get; set; }
+    // C-46: last chosen active horn ("devil" | "star"; null: config default)
+    [JsonPropertyName("active_horn")] public string? ActiveHorn { get; set; }
 }
 
 public sealed class LibraryStore
@@ -253,6 +255,15 @@ public sealed class LibraryStore
     public void SetAnnouncerPersonality(string id)
     {
         lock (_gate) { _data.AnnouncerPersonality = id; Save(); }
+        // No Changed event: operator preference, not library content.
+    }
+
+    // --- C-46: persisted active horn ("devil" | "star") ---------------------------------
+    public string? GetActiveHorn() { lock (_gate) return _data.ActiveHorn; }
+
+    public void SetActiveHorn(string id)
+    {
+        lock (_gate) { _data.ActiveHorn = id; Save(); }
         // No Changed event: operator preference, not library content.
     }
 

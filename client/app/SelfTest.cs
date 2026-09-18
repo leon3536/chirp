@@ -144,7 +144,7 @@ public static class SelfTest
         Render(500); // 5 s held: attack (1 s) long over — must still be looping
         Check(engine.Snapshot().HornActive && Render(10) > 0.01, "horn loops while held");
         engine.HornUp();
-        Render(200); // 2 s ≥ cross (50 ms) + tail (1.27 s)
+        Render(500); // 5 s ≥ cross (50 ms) + tail (Star's is 3.5 s, the longer horn)
         Check(!engine.Snapshot().HornActive, "horn reaches idle after release");
         Check(Render(10) < 1e-6, "horn tail decays to silence");
 
@@ -153,8 +153,16 @@ public static class SelfTest
         engine.RenderOneBlockForTest(mix, pcm); // ~10 ms "tap"
         engine.HornUp();
         Check(Render(80) > 0.01, "tap yields a full-sounding blast");
-        Render(300);
+        Render(500); // clear attack + the longer horn's tail
         Check(Render(10) < 1e-6, "tap blast finishes to silence");
+
+        // Two named horns + Ctrl+H toggle (C-46)
+        string horn0 = engine.Snapshot().ActiveHorn;
+        string horn1 = engine.ToggleHorn();
+        Check(horn1 != horn0 && engine.Snapshot().ActiveHorn == horn1, "Ctrl+H toggles the active horn");
+        engine.HornDown(); Check(Render(30) > 0.01, "toggled-to horn sounds"); engine.HornUp(); Render(500);
+        engine.SetActiveHorn(horn0);
+        Check(engine.Snapshot().ActiveHorn == horn0, "active horn can be restored (persist path)");
 
         // C-17 guard: the last selected collection of a populated mode can't be deselected
         Check(!lib.SetSelected(col.Id, false), "last selected collection refuses deselection");

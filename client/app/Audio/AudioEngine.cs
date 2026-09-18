@@ -25,7 +25,8 @@ public enum SpeakerMode { StreamOnly, PlaybackAndStream, PlaybackOnly }
 public sealed record EngineSnapshot(
     int Mode, bool IsPlaying, string NowPlayingLabel, string NowPlayingClipId,
     double RemainingSeconds, double DurationSeconds, bool HornActive, bool PoolEmpty,
-    SpeakerMode Speaker, bool BoothConnected, string BoothStatus, string NextLabel, bool MicOpen);
+    SpeakerMode Speaker, bool BoothConnected, string BoothStatus, string NextLabel, bool MicOpen,
+    string ActiveHorn);
 
 public sealed class AudioEngine : IDisposable
 {
@@ -38,7 +39,12 @@ public sealed class AudioEngine : IDisposable
     private readonly object _gate = new();
 
     private readonly Dictionary<string, float[]> _cache = new(); // C-14
-    private readonly Horn _hornMachine; // C-9: attack / loop-while-held / tail
+    // C-9/C-46: two named horns, each attack / loop-while-held / tail. H fires
+    // the active one; Ctrl+H toggles which is active.
+    private readonly Horn _devilHorn;
+    private readonly Horn _starHorn;
+    private volatile string _activeHorn; // "devil" | "star"
+    private Horn? _heldHorn;             // horn started by the current hold (Up releases THIS one)
 
     private Voice? _music;
     private Voice? _announcement; // C-42: mixed above music, never ducked itself
@@ -108,10 +114,15 @@ public sealed class AudioEngine : IDisposable
     {
         _cfg = cfg;
         _library = library;
-        _hornMachine = new Horn(
-            LoadHornAsset("horn_attack.wav"),
-            LoadHornAsset("horn_loop.wav"),
-            LoadHornAsset("horn_tail.wav")); // C-20
+        _devilHorn = new Horn(
+            LoadHornAsset("devil_horn_attack.wav"),
+            LoadHornAsset("devil_horn_loop.wav"),
+            LoadHornAsset("devil_horn_tail.wav")); // C-20/C-46
+        _starHorn = new Horn(
+            LoadHornAsset("star_horn_attack.wav"),
+            LoadHornAsset("star_horn_loop.wav"),
+            LoadHornAsset("star_horn_tail.wav")); // C-20/C-46
+        _activeHorn = NormalizeHorn(library.GetActiveHorn() ?? cfg.DefaultHorn); // persisted wins (C-46)
         _pusher = new BoothPusher(cfg.BoothIp, cfg.BoothPort);
         _pusher.ConnectionChanged += up => ConnectionChanged?.Invoke(up);
         _pusher.Kicked += () => BoothKicked?.Invoke();
@@ -317,18 +328,44 @@ public sealed class AudioEngine : IDisposable
         StateChanged?.Invoke();
     }
 
-    /// <summary>H down (C-9): horn starts instantly; sustain loops while held.
-    /// Works in every mode — the goal horn is never gated.</summary>
+    /// <summary>H down (C-9): the active horn starts instantly; sustain loops while
+    /// held. Works in every mode — the goal horn is never gated.</summary>
     public void HornDown()
     {
-        lock (_gate) _hornMachine.Down();
+        lock (_gate) { _heldHorn = ActiveHornMachine; _heldHorn.Down(); }
         StateChanged?.Invoke();
     }
 
-    /// <summary>H up (C-9): finish with the natural decay tail; never cut, never faded.</summary>
+    /// <summary>H up (C-9): finish with the natural decay tail; never cut, never
+    /// faded. Releases the horn this hold started, even if the active horn was
+    /// toggled mid-hold (C-46).</summary>
     public void HornUp()
     {
-        lock (_gate) _hornMachine.Up();
+        lock (_gate) (_heldHorn ?? ActiveHornMachine).Up();
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>C-46: which horn H fires ("devil" | "star").</summary>
+    public string ActiveHorn { get { lock (_gate) return _activeHorn; } }
+
+    private Horn ActiveHornMachine => _activeHorn == "devil" ? _devilHorn : _starHorn;
+
+    private static string NormalizeHorn(string? id) => id == "devil" ? "devil" : "star";
+
+    /// <summary>C-46: Ctrl+H — switch the active horn. A horn already sounding keeps
+    /// playing; the switch applies to the next H press. Returns the new active id.</summary>
+    public string ToggleHorn()
+    {
+        string now;
+        lock (_gate) now = _activeHorn = _activeHorn == "devil" ? "star" : "devil";
+        StateChanged?.Invoke();
+        return now;
+    }
+
+    /// <summary>C-46: restore the persisted/default active horn (startup).</summary>
+    public void SetActiveHorn(string id)
+    {
+        lock (_gate) _activeHorn = NormalizeHorn(id);
         StateChanged?.Invoke();
     }
 
@@ -401,13 +438,14 @@ public sealed class AudioEngine : IDisposable
                 NowPlayingClipId: current?.ClipId ?? "",
                 RemainingSeconds: current?.RemainingSeconds ?? 0,
                 DurationSeconds: current?.DurationSeconds ?? 0,
-                HornActive: _hornMachine.Sounding,
+                HornActive: _devilHorn.Sounding || _starHorn.Sounding,
                 PoolEmpty: _mode != 4 && _library.Pool(_mode).Count == 0,
                 Speaker: _speaker,
                 BoothConnected: _pusher.IsConnected,
                 BoothStatus: _pusher.Status,
                 NextLabel: _mode == 4 ? "" : PeekNextLocked(_mode)?.Label ?? "",
-                MicOpen: _micOpen);
+                MicOpen: _micOpen,
+                ActiveHorn: _activeHorn);
         }
     }
 
@@ -647,7 +685,7 @@ public sealed class AudioEngine : IDisposable
         {
             // C-9/C-42: smooth duck toward the deepest active target — horn (held or
             // tailing) and/or a running announcement.
-            bool hornLive = _hornMachine.Sounding;
+            bool hornLive = _devilHorn.Sounding || _starHorn.Sounding;
             bool annLive = _announcement is not null && !_announcement.Done;
             bool micLive = _micOpen;
             double duckTarget = 1.0;
@@ -677,7 +715,9 @@ public sealed class AudioEngine : IDisposable
             }
             _duck = Lerp(_duck, duckTarget);
 
-            _hornMachine.MixInto(mix); // horn is never ducked or faded (C-9)
+            _devilHorn.MixInto(mix); // horns are never ducked or faded (C-9); only
+            _starHorn.MixInto(mix);  // one sounds at a time, but a mid-hold toggle
+                                     // can leave the previous one tailing — mix both.
 
             if (_announcement is not null)
             {

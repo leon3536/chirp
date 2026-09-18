@@ -1,20 +1,19 @@
-// rgas-source background hotkeys — SPEC C-6, C-7, C-9, C-45.
+// rgas-source background hotkeys — SPEC C-6, C-7, C-9, C-45, C-46.
 //
-// A WH_KEYBOARD_LL low-level keyboard hook. While Enabled, Space / 1-4 / H are
-// observed system-wide — even with the app unfocused or minimized — but this
-// is a PASSIVE subscription: every event is always passed on to
-// CallNextHookEx, so the focused app (e.g. a scorekeeping program that also
-// binds Space) still receives every key exactly as if the hook weren't
-// installed (C-6). While a text input inside this app has focus, SuppressCheck
-// returns true and the hook does not fire its own action either (C-7).
-// Disabled, the hook still passes everything through untouched and fires no
-// actions; the window's normal PreviewKeyDown/Up handles focused-mode keys
-// instead.
+// A WH_KEYBOARD_LL low-level keyboard hook. While Enabled, Space / 1-4 / H / A
+// are observed system-wide — even with the app unfocused or minimized — but this
+// is a PASSIVE subscription: every event is always passed on to CallNextHookEx,
+// so the focused app (e.g. a scorekeeping program that also binds Space) still
+// receives every key exactly as if the hook weren't installed (C-6). While a
+// text input inside this app has focus, SuppressCheck returns true and the hook
+// does not fire its own action either (C-7). Disabled, the hook still passes
+// everything through untouched and fires no actions; the window's normal
+// PreviewKeyDown/Up handles focused-mode keys instead.
 //
-// OS auto-repeat is filtered so a held Space doesn't toggle playback
-// repeatedly. H reports both edges — the horn is hold-to-sound (C-9).
-// O is only a hotkey (open mic, C-45) with Ctrl held at the moment of the
-// key-down; otherwise it's an ordinary keystroke.
+// OS auto-repeat is filtered so a held Space doesn't toggle playback repeatedly.
+// H reports both edges — the horn is hold-to-sound (C-9); Ctrl+H is a toggle tap
+// that switches the active horn (C-46). O is only a hotkey (open mic, C-45) with
+// Ctrl held at the moment of the key-down; otherwise it's an ordinary keystroke.
 //
 // Install on the UI thread (the hook callback needs its message pump).
 using System.Diagnostics;
@@ -22,7 +21,7 @@ using System.Runtime.InteropServices;
 
 namespace RgasSoundboard.Hotkeys;
 
-public enum HotkeyAction { Space, Mode1, Mode2, Mode3, Mode4, Horn, Announce, Skip, OpenMic }
+public enum HotkeyAction { Space, Mode1, Mode2, Mode3, Mode4, Horn, HornToggle, Announce, Skip, OpenMic }
 
 public sealed class GlobalKeyboardHook : IDisposable
 {
@@ -32,10 +31,14 @@ public sealed class GlobalKeyboardHook : IDisposable
     private const int WM_SYSKEYDOWN = 0x0104;
     private const int WM_SYSKEYUP = 0x0105;
 
+    private const int VK_CONTROL = 0x11;
+    private const int VK_H = 0x48;
+
     private readonly LowLevelKeyboardProc _proc; // kept alive: GC of this delegate kills the hook
     private readonly HashSet<int> _down = new(); // auto-repeat filter
     private IntPtr _hook = IntPtr.Zero;
     private bool _enabled;
+    private bool _hIsToggle; // the current H hold began as Ctrl+H (a horn toggle), not a horn blast
 
     public bool Enabled
     {
@@ -73,11 +76,6 @@ public sealed class GlobalKeyboardHook : IDisposable
         _ => null,
     };
 
-    private const int VK_CONTROL = 0x11;
-
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
-
     private IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode >= 0 && _enabled && !(SuppressCheck?.Invoke() ?? false))
@@ -95,7 +93,26 @@ public sealed class GlobalKeyboardHook : IDisposable
                     action = null;
                 if (action is not null)
                 {
-                    if (isDown)
+                    // C-46: H alone = the hold-to-sound horn; Ctrl+H = a toggle tap.
+                    // Decide at key-down (from the live Ctrl state) and remember it,
+                    // so the matching key-up fires the same action's edge.
+                    if (vk == VK_H)
+                    {
+                        if (isDown)
+                        {
+                            if (_down.Add(vk))
+                            {
+                                _hIsToggle = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+                                Hotkey?.Invoke(_hIsToggle ? HotkeyAction.HornToggle : HotkeyAction.Horn, true);
+                            }
+                        }
+                        else
+                        {
+                            _down.Remove(vk);
+                            Hotkey?.Invoke(_hIsToggle ? HotkeyAction.HornToggle : HotkeyAction.Horn, false);
+                        }
+                    }
+                    else if (isDown)
                     {
                         if (_down.Add(vk)) // first edge only; swallow auto-repeats
                             Hotkey?.Invoke(action.Value, true);
@@ -131,4 +148,7 @@ public sealed class GlobalKeyboardHook : IDisposable
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey); // C-45/C-46: live Ctrl state
 }
