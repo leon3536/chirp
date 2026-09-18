@@ -39,17 +39,20 @@ public sealed class AnnouncerService
     {
         new("energetic", "ENERGETIC MALE", "⚡", "ash",
             "a high-octane young male arena announcer, fast-paced and bursting with infectious energy",
-            "rapid-fire and breathless, bouncing off the walls with unstoppable hype"),
+            "a rapid-fire, breathless burst of unstoppable hype — bright, punchy and bouncing with excitement"),
         new("deep_bass", "DEEP BASS MALE", "🎙", "onyx",
             "a legendary veteran male play-by-play announcer with a deep, warm, resonant bass voice that " +
             "fills the arena — in the mold of a classic ESPN highlight-reel man like Chris Berman",
-            // Chris-Berman energy: a big jubilant boom, NOT rasp. Explicitly steer
-            // away from the gravelly crack the shared prompt used to force.
-            "a huge, warm, thunderous boom brimming with jubilant excitement — powerful, rolling and iconic, " +
-            "but always SMOOTH and full-chested; keep it resonant and never gravelly, raspy, strained, or cracking"),
+            // The rasp/break was strain: onyx cracks when pushed to a full scream.
+            // Cap the effort and route the excitement through resonance, not volume.
+            "a triumphant, joyful roar that stays deep, warm and perfectly SMOOTH — big and resonant, " +
+            "powered by chest and depth, not by volume or strain. Hold a controlled register at about " +
+            "80% effort: never shout at the very top of your range, never let the voice go gravelly, raspy, " +
+            "thin, breathy, or crack. A rich, effortless, iconic ESPN highlight-reel boom — thrilling, but " +
+            "always polished and clean"),
         new("authority_f", "AUTHORITATIVE FEMALE", "👑", "sage",
             "a commanding, authoritative female arena announcer with crisp, confident, unmistakable delivery",
-            "commanding and triumphant, crisp and powerful, rising to a confident roar"),
+            "a commanding, triumphant surge — crisp, powerful and confident, rising to a clear ringing roar without strain"),
     };
 
     public static Personality GetPersonality(string? id) =>
@@ -259,14 +262,13 @@ public sealed class AnnouncerService
                     // C-42: the original dramatic prompt — the version that behaved.
                     // (Plain announcements never reach this model; see OpenAiTtsAsync.)
                     ["content"] =
-                        $"You are {personality.Persona}, at the exact moment of " +
-                        "a game-winning overtime goal. Perform the user's announcement with " +
-                        "full-throated, ecstatic intensity — explosive attack and a huge dramatic " +
-                        $"build. Your excited delivery: {personality.ExcitedStyle}. Stretch elongated " +
-                        "words ('GOOOAL') for seconds. Bellow ALL-CAPS words. Speak ONLY the " +
-                        "announcement itself, word-for-word as given — no greetings, no " +
-                        "commentary, nothing added. Text in (parentheses) is performance " +
-                        "direction only: act on it, never speak it.",
+                        $"You are {personality.Persona}, calling the exact moment of a " +
+                        "game-winning overtime goal. Deliver the announcement exactly like this: " +
+                        $"{personality.ExcitedStyle}. You may stretch elongated words ('GOOOAL') " +
+                        "for a beat and lean into ALL-CAPS words, but never at the cost of that " +
+                        "vocal quality. Speak ONLY the announcement itself, word-for-word as given " +
+                        "— no greetings, no commentary, nothing added. Text in (parentheses) is " +
+                        "performance direction only: act on it, never speak it.",
                 },
                 new Dictionary<string, object?> { ["role"] = "user", ["content"] = text },
             },
