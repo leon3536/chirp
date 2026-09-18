@@ -32,26 +32,16 @@ public sealed class AnnouncerService
 
     // --- C-42: personalities ------------------------------------------------------
 
-    public sealed record Personality(
-        string Id, string Label, string Emoji, string OpenAiVoice, string Persona, string ExcitedStyle);
+    public sealed record Personality(string Id, string Label, string Emoji, string OpenAiVoice, string Persona);
 
     public static readonly Personality[] Personalities =
     {
         new("energetic", "ENERGETIC MALE", "⚡", "ash",
-            "a high-octane young male arena announcer, fast-paced and bursting with infectious energy",
-            "a rapid-fire, breathless burst of unstoppable hype — bright, punchy and bouncing with excitement"),
+            "a high-octane young male arena announcer, fast-paced and bursting with infectious energy"),
         new("deep_bass", "DEEP BASS MALE", "🎙", "onyx",
-            "a powerful male arena announcer in the prime of his career, with a deep, rich, resonant " +
-            "chest-voice bass — full, round, warm and commanding",
-            // "old man" came from restraint words (veteran / 80% effort); rasp came
-            // from strain. Want deep + full + powerful + YOUNG-prime + smooth.
-            "a huge, thrilling roar that stays deep and perfectly SMOOTH — pitched LOW and powered " +
-            "from deep in the chest, full-bodied, round and resonant. Big, vigorous and commanding, a voice " +
-            "in its powerful prime; never thin, reedy, nasal, breathy, quavery, old, gravelly, raspy or " +
-            "cracking. The excitement rides on depth, fullness and warmth, not on shouting high or hard"),
+            "a legendary veteran male announcer with a deep, booming bass voice that rumbles through the arena"),
         new("authority_f", "AUTHORITATIVE FEMALE", "👑", "sage",
-            "a commanding, authoritative female arena announcer with crisp, confident, unmistakable delivery",
-            "a commanding, triumphant surge — crisp, powerful and confident, rising to a clear ringing roar without strain"),
+            "a commanding, authoritative female arena announcer with crisp, confident, unmistakable delivery"),
     };
 
     public static Personality GetPersonality(string? id) =>
@@ -120,28 +110,22 @@ public sealed class AnnouncerService
             throw new InvalidOperationException("No announcer API key configured.");
 
         bool openAi = key.StartsWith("sk-", StringComparison.Ordinal); // ElevenLabs keys are sk_
-        byte[] audio = Array.Empty<byte>();
+        byte[] audio;
         string ext;
         if (openAi && dramatic)
         {
             // Dramatic: the omni PERFORMANCE model, with the verbatim guard — check
-            // each take's transcript against the script and keep the first that
-            // lands on-script. Loop a few times before giving up (improv never
-            // airs), then fall back to the verbatim TTS endpoint (which cannot
-            // ad-lib) delivered excitedly — so the operator always gets a clean,
-            // on-script take rather than an "off-script twice" error.
+            // the returned transcript against the script; off-script is retried
+            // once, then refused. Improv never airs.
             ext = "wav";
-            const int maxAttempts = 4;
-            bool aired = false;
-            for (int attempt = 0; attempt < maxAttempts && !ct.IsCancellationRequested; attempt++)
+            string? transcript;
+            (audio, transcript) = await OpenAiOmniAsync(key, text, personality, ct);
+            if (!OnScript(script, transcript))
             {
-                var (take, transcript) = await OpenAiOmniAsync(key, text, personality, ct);
-                if (OnScript(script, transcript)) { audio = take; aired = true; break; }
-            }
-            if (!aired)
-            {
-                ext = "mp3";
-                audio = await OpenAiTtsAsync(key, script, directions, personality, ct, excited: true);
+                (audio, transcript) = await OpenAiOmniAsync(key, text, personality, ct);
+                if (!OnScript(script, transcript))
+                    throw new InvalidOperationException(
+                        $"The performance went off-script twice (said: “{Truncate(transcript ?? "?", 90)}”). Try again.");
             }
         }
         else if (openAi)
@@ -200,18 +184,6 @@ public sealed class AnnouncerService
     /// <summary>Lenient script-vs-transcript check (internal for selftest): tolerant
     /// of elongation ("GOOOAL"), punctuation, and spoken numbers; flags missing
     /// words or substantial ad-libbed extras. No transcript => assume on-script.</summary>
-    // C-42: wordless excited exclamations an operator is happy to hear improvised
-    // (whoo / yeah / wow / let's go). These do NOT count as off-script "extras" —
-    // only invented words/commentary do. Stored in the same elongation-collapsed
-    // form Tokens() produces (so "whoo"->"who", "boom"->"bom", "yesss"->"yes").
-    private static readonly HashSet<string> Interjections =
-        new[] { "whoo", "woo", "woohoo", "wahoo", "yeah", "yea", "yes", "wow", "whoa",
-                "woah", "oh", "ooh", "boom", "yay", "hey", "ho", "ha", "haha", "baby",
-                "lets", "let", "go", "come", "on", "woot", "aw", "ah", "yow", "ole",
-                "uh", "huh", "yo", "wooo", "bam", "pow" }
-            .Select(w => Regex.Replace(w, @"(\p{L})\1+", "$1"))
-            .ToHashSet();
-
     internal static bool OnScript(string script, string? transcript)
     {
         if (string.IsNullOrWhiteSpace(transcript)) return true;
@@ -228,37 +200,24 @@ public sealed class AnnouncerService
         foreach (var word in expected)
             if (pool.Remove(word)) matched++;
         double coverage = matched / (double)expected.Count;
-        // Extras = spoken words not in the script AND not an excited exclamation.
-        // Excited exclamations are welcome; invented words/commentary are not.
-        int extras = pool.Count(w => !Interjections.Contains(w));
-        // Must say (almost) all the script words and add essentially no real words.
-        // One stray tolerates a transcription slip; real improv ("he scores", "and
-        // it's good") is 2+ non-exclamation extras and is caught.
-        return coverage >= 0.75 && extras <= 1;
+        int extras = pool.Count; // spoken words that aren't in the script
+        return coverage >= 0.6 && extras <= Math.Max(4, (int)(expected.Count * 0.8));
     }
 
     /// <summary>Plain path: /v1/audio/speech reads the input verbatim — no script
     /// guard needed. Persona + any (directions) ride in the instructions field.</summary>
     private async Task<byte[]> OpenAiTtsAsync(string key, string script, string? directions,
-        Personality personality, CancellationToken ct, bool excited = false)
+        Personality personality, CancellationToken ct)
     {
         var body = new Dictionary<string, object?>
         {
             ["model"] = "gpt-4o-mini-tts",
             ["voice"] = personality.OpenAiVoice,
             ["input"] = script, // parens stripped: a TTS engine would read them aloud
-            // This endpoint reads the input verbatim — it cannot add words — so it
-            // doubles as the always-on-script fallback when the omni performance
-            // keeps improvising. `excited` gives that fallback game-moment energy.
-            ["instructions"] = excited
-                ? $"You are {personality.Persona}. It is the exact moment of a game-winning " +
-                  "goal — deliver this with big, thrilling, celebratory arena energy. " +
-                  $"Excited delivery: {personality.ExcitedStyle}." +
-                  (directions is null ? "" : $" Voice direction: {directions}.")
-                : $"You are {personality.Persona}, making a routine " +
-                  "public-address announcement at a community ice rink. " +
-                  "Calm, clear, unhurried delivery." +
-                  (directions is null ? "" : $" Voice direction: {directions}."),
+            ["instructions"] = $"You are {personality.Persona}, making a routine " +
+                               "public-address announcement at a community ice rink. " +
+                               "Calm, clear, unhurried delivery." +
+                               (directions is null ? "" : $" Voice direction: {directions}."),
             ["response_format"] = "mp3",
         };
         using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech")
@@ -292,17 +251,14 @@ public sealed class AnnouncerService
                     // C-42: the original dramatic prompt — the version that behaved.
                     // (Plain announcements never reach this model; see OpenAiTtsAsync.)
                     ["content"] =
-                        $"You are {personality.Persona}, calling the exact moment of a " +
-                        "game-winning overtime goal. Deliver the announcement exactly like this: " +
-                        $"{personality.ExcitedStyle}. You may stretch elongated words ('GOOOAL') " +
-                        "for a beat and lean into ALL-CAPS words, but never at the cost of that " +
-                        "vocal quality. You MAY throw in short excited exclamations — 'WHOO!', " +
-                        "'YEAH!', 'WOW!', 'OH!', 'LET'S GO!' — to sell the moment. But do NOT add any " +
-                        "real words or information: no play-by-play, no color commentary, no crowd " +
-                        "noise, no greetings or sign-offs, and nothing like 'he scores', 'and it's " +
-                        "good', 'what a goal', or 'ladies and gentlemen'. Say every actual word of the " +
-                        "announcement exactly as written and invent no facts. Text in (parentheses) is " +
-                        "performance direction only: act on it, never speak it.",
+                        $"You are {personality.Persona}, at the exact moment of " +
+                        "a game-winning overtime goal. Perform the user's announcement with " +
+                        "full-throated, screaming, ecstatic intensity — explosive attack, huge " +
+                        "dramatic build, voice cracking with excitement. Stretch elongated " +
+                        "words ('GOOOAL') for seconds. Bellow ALL-CAPS words. Speak ONLY the " +
+                        "announcement itself, word-for-word as given — no greetings, no " +
+                        "commentary, nothing added. Text in (parentheses) is performance " +
+                        "direction only: act on it, never speak it.",
                 },
                 new Dictionary<string, object?> { ["role"] = "user", ["content"] = text },
             },
