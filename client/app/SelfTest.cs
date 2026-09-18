@@ -358,6 +358,11 @@ public static class SelfTest
                 "Welcome everyone to the game tonight"),
             "unrelated speech is flagged off-script");
         Check(AnnouncerService.OnScript("anything", null), "missing transcript assumed on-script");
+        // C-42: excited exclamations welcome; invented commentary still caught
+        Check(AnnouncerService.OnScript("Blue Devils win!", "WHOO! YEAH! Blue Devils win! WOW!"),
+            "excited exclamations (whoo/yeah/wow) are allowed");
+        Check(!AnnouncerService.OnScript("Blue Devils win!", "Blue Devils win, he scores!"),
+            "invented commentary (he scores) still flagged off-script");
 
         // Personalities (C-42): three, unique ids and voices, safe default
         Check(AnnouncerService.Personalities.Length == 3

@@ -194,6 +194,18 @@ public sealed class AnnouncerService
     /// <summary>Lenient script-vs-transcript check (internal for selftest): tolerant
     /// of elongation ("GOOOAL"), punctuation, and spoken numbers; flags missing
     /// words or substantial ad-libbed extras. No transcript => assume on-script.</summary>
+    // C-42: wordless excited exclamations an operator is happy to hear improvised
+    // (whoo / yeah / wow / let's go). These do NOT count as off-script "extras" —
+    // only invented words/commentary do. Stored in the same elongation-collapsed
+    // form Tokens() produces (so "whoo"->"who", "boom"->"bom", "yesss"->"yes").
+    private static readonly HashSet<string> Interjections =
+        new[] { "whoo", "woo", "woohoo", "wahoo", "yeah", "yea", "yes", "wow", "whoa",
+                "woah", "oh", "ooh", "boom", "yay", "hey", "ho", "ha", "haha", "baby",
+                "lets", "let", "go", "come", "on", "woot", "aw", "ah", "yow", "ole",
+                "uh", "huh", "yo", "wooo", "bam", "pow" }
+            .Select(w => Regex.Replace(w, @"(\p{L})\1+", "$1"))
+            .ToHashSet();
+
     internal static bool OnScript(string script, string? transcript)
     {
         if (string.IsNullOrWhiteSpace(transcript)) return true;
@@ -210,10 +222,12 @@ public sealed class AnnouncerService
         foreach (var word in expected)
             if (pool.Remove(word)) matched++;
         double coverage = matched / (double)expected.Count;
-        int extras = pool.Count; // spoken words that aren't in the script
-        // Strict: the performance must say (almost) all the script words and add
-        // essentially nothing. One stray token tolerates a transcription slip;
-        // real improv ("he scores", "and it's good") is 2+ extras and is caught.
+        // Extras = spoken words not in the script AND not an excited exclamation.
+        // Excited exclamations are welcome; invented words/commentary are not.
+        int extras = pool.Count(w => !Interjections.Contains(w));
+        // Must say (almost) all the script words and add essentially no real words.
+        // One stray tolerates a transcription slip; real improv ("he scores", "and
+        // it's good") is 2+ non-exclamation extras and is caught.
         return coverage >= 0.75 && extras <= 1;
     }
 
@@ -268,12 +282,13 @@ public sealed class AnnouncerService
                         "game-winning overtime goal. Deliver the announcement exactly like this: " +
                         $"{personality.ExcitedStyle}. You may stretch elongated words ('GOOOAL') " +
                         "for a beat and lean into ALL-CAPS words, but never at the cost of that " +
-                        "vocal quality. CRITICAL: say ONLY the announcement itself, word-for-word as " +
-                        "given, and add absolutely nothing — no greetings, no sign-offs, no play-by-play " +
-                        "or color commentary, no crowd noise, and no interjections such as 'he scores', " +
-                        "'and it's good', or 'what a goal'. If the announcement is 'Blue Devils win', you " +
-                        "say exactly and only 'Blue Devils win'. Text in (parentheses) is performance " +
-                        "direction only: act on it, never speak it.",
+                        "vocal quality. You MAY throw in short excited exclamations — 'WHOO!', " +
+                        "'YEAH!', 'WOW!', 'OH!', 'LET'S GO!' — to sell the moment. But do NOT add any " +
+                        "real words or information: no play-by-play, no color commentary, no crowd " +
+                        "noise, no greetings or sign-offs, and nothing like 'he scores', 'and it's " +
+                        "good', 'what a goal', or 'ladies and gentlemen'. Say every actual word of the " +
+                        "announcement exactly as written and invent no facts. Text in (parentheses) is " +
+                        "performance direction only: act on it, never speak it.",
                 },
                 new Dictionary<string, object?> { ["role"] = "user", ["content"] = text },
             },
