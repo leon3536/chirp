@@ -32,16 +32,24 @@ public sealed class AnnouncerService
 
     // --- C-42: personalities ------------------------------------------------------
 
-    public sealed record Personality(string Id, string Label, string Emoji, string OpenAiVoice, string Persona);
+    public sealed record Personality(
+        string Id, string Label, string Emoji, string OpenAiVoice, string Persona, string ExcitedStyle);
 
     public static readonly Personality[] Personalities =
     {
         new("energetic", "ENERGETIC MALE", "⚡", "ash",
-            "a high-octane young male arena announcer, fast-paced and bursting with infectious energy"),
+            "a high-octane young male arena announcer, fast-paced and bursting with infectious energy",
+            "rapid-fire and breathless, bouncing off the walls with unstoppable hype"),
         new("deep_bass", "DEEP BASS MALE", "🎙", "onyx",
-            "a legendary veteran male announcer with a deep, booming bass voice that rumbles through the arena"),
+            "a legendary veteran male play-by-play announcer with a deep, warm, resonant bass voice that " +
+            "fills the arena — in the mold of a classic ESPN highlight-reel man like Chris Berman",
+            // Chris-Berman energy: a big jubilant boom, NOT rasp. Explicitly steer
+            // away from the gravelly crack the shared prompt used to force.
+            "a huge, warm, thunderous boom brimming with jubilant excitement — powerful, rolling and iconic, " +
+            "but always SMOOTH and full-chested; keep it resonant and never gravelly, raspy, strained, or cracking"),
         new("authority_f", "AUTHORITATIVE FEMALE", "👑", "sage",
-            "a commanding, authoritative female arena announcer with crisp, confident, unmistakable delivery"),
+            "a commanding, authoritative female arena announcer with crisp, confident, unmistakable delivery",
+            "commanding and triumphant, crisp and powerful, rising to a confident roar"),
     };
 
     public static Personality GetPersonality(string? id) =>
@@ -253,8 +261,8 @@ public sealed class AnnouncerService
                     ["content"] =
                         $"You are {personality.Persona}, at the exact moment of " +
                         "a game-winning overtime goal. Perform the user's announcement with " +
-                        "full-throated, screaming, ecstatic intensity — explosive attack, huge " +
-                        "dramatic build, voice cracking with excitement. Stretch elongated " +
+                        "full-throated, ecstatic intensity — explosive attack and a huge dramatic " +
+                        $"build. Your excited delivery: {personality.ExcitedStyle}. Stretch elongated " +
                         "words ('GOOOAL') for seconds. Bellow ALL-CAPS words. Speak ONLY the " +
                         "announcement itself, word-for-word as given — no greetings, no " +
                         "commentary, nothing added. Text in (parentheses) is performance " +
