@@ -41,15 +41,14 @@ public sealed class AnnouncerService
             "a high-octane young male arena announcer, fast-paced and bursting with infectious energy",
             "a rapid-fire, breathless burst of unstoppable hype — bright, punchy and bouncing with excitement"),
         new("deep_bass", "DEEP BASS MALE", "🎙", "onyx",
-            "a legendary veteran male play-by-play announcer with a deep, warm, resonant bass voice that " +
-            "fills the arena — in the mold of a classic ESPN highlight-reel man like Chris Berman",
-            // The rasp/break was strain: onyx cracks when pushed to a full scream.
-            // Cap the effort and route the excitement through resonance, not volume.
-            "a triumphant, joyful roar that stays deep, warm and perfectly SMOOTH — big and resonant, " +
-            "powered by chest and depth, not by volume or strain. Hold a controlled register at about " +
-            "80% effort: never shout at the very top of your range, never let the voice go gravelly, raspy, " +
-            "thin, breathy, or crack. A rich, effortless, iconic ESPN highlight-reel boom — thrilling, but " +
-            "always polished and clean"),
+            "a powerful male arena announcer in the prime of his career, with a deep, rich, resonant " +
+            "chest-voice bass — full, round, warm and commanding",
+            // "old man" came from restraint words (veteran / 80% effort); rasp came
+            // from strain. Want deep + full + powerful + YOUNG-prime + smooth.
+            "a huge, thrilling roar that stays deep and perfectly SMOOTH — pitched LOW and powered " +
+            "from deep in the chest, full-bodied, round and resonant. Big, vigorous and commanding, a voice " +
+            "in its powerful prime; never thin, reedy, nasal, breathy, quavery, old, gravelly, raspy or " +
+            "cracking. The excitement rides on depth, fullness and warmth, not on shouting high or hard"),
         new("authority_f", "AUTHORITATIVE FEMALE", "👑", "sage",
             "a commanding, authoritative female arena announcer with crisp, confident, unmistakable delivery",
             "a commanding, triumphant surge — crisp, powerful and confident, rising to a clear ringing roar without strain"),
@@ -212,7 +211,10 @@ public sealed class AnnouncerService
             if (pool.Remove(word)) matched++;
         double coverage = matched / (double)expected.Count;
         int extras = pool.Count; // spoken words that aren't in the script
-        return coverage >= 0.6 && extras <= Math.Max(4, (int)(expected.Count * 0.8));
+        // Strict: the performance must say (almost) all the script words and add
+        // essentially nothing. One stray token tolerates a transcription slip;
+        // real improv ("he scores", "and it's good") is 2+ extras and is caught.
+        return coverage >= 0.75 && extras <= 1;
     }
 
     /// <summary>Plain path: /v1/audio/speech reads the input verbatim — no script
@@ -266,9 +268,12 @@ public sealed class AnnouncerService
                         "game-winning overtime goal. Deliver the announcement exactly like this: " +
                         $"{personality.ExcitedStyle}. You may stretch elongated words ('GOOOAL') " +
                         "for a beat and lean into ALL-CAPS words, but never at the cost of that " +
-                        "vocal quality. Speak ONLY the announcement itself, word-for-word as given " +
-                        "— no greetings, no commentary, nothing added. Text in (parentheses) is " +
-                        "performance direction only: act on it, never speak it.",
+                        "vocal quality. CRITICAL: say ONLY the announcement itself, word-for-word as " +
+                        "given, and add absolutely nothing — no greetings, no sign-offs, no play-by-play " +
+                        "or color commentary, no crowd noise, and no interjections such as 'he scores', " +
+                        "'and it's good', or 'what a goal'. If the announcement is 'Blue Devils win', you " +
+                        "say exactly and only 'Blue Devils win'. Text in (parentheses) is performance " +
+                        "direction only: act on it, never speak it.",
                 },
                 new Dictionary<string, object?> { ["role"] = "user", ["content"] = text },
             },
